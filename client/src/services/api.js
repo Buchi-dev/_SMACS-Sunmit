@@ -45,7 +45,7 @@ export const getSubjectById = (id) => API.get(`/subjects/${id}`);
 export const createSubject = (data) => API.post('/subjects', data);
 export const updateSubject = (id, data) => API.put(`/subjects/${id}`, data);
 export const deleteSubject = (id) => API.delete(`/subjects/${id}`);
-export const getSubjectsByFaculty = (facultyId) => API.get(`/subjects/faculty/${facultyId}`);
+export const getSubjectsByFaculty = (facultyId) => API.get('/subjects', { params: { facultyId } });
 
 // Attendance endpoints
 export const markAttendance = (data) => API.post('/attendance', data);

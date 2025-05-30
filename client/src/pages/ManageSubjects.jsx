@@ -17,7 +17,8 @@ import {
   Tooltip,
   TimePicker,
   Row,
-  Col
+  Col,
+  App
 } from 'antd';
 import { 
   PlusOutlined, 
@@ -41,6 +42,15 @@ import {
   getAllFaculty
 } from '../services/api';
 import DataLoader from '../components/DataLoader';
+
+// Custom CSS for disabled inputs that need to show value clearly
+const styles = {
+  disabledInputWithValue: {
+    color: 'rgba(0, 0, 0, 0.85)',
+    backgroundColor: '#f5f5f5',
+    cursor: 'not-allowed'
+  }
+};
 
 const { Title } = Typography;
 const { Option } = Select;
@@ -108,11 +118,11 @@ const ManageSubjects = () => {
       });
     } else {
       form.resetFields();
-      // For faculty users, pre-fill the faculty field with their own name
-      if (role === 'faculty') {
+      // For faculty users, pre-fill the faculty field with their own name and ID
+      if (role === 'faculty' && user) {
         form.setFieldsValue({
-          faculty: user?.name,
-          facultyId: user?.id
+          faculty: user.name || user.username,
+          facultyId: user.id
         });
       }
     }
@@ -151,10 +161,10 @@ const ManageSubjects = () => {
         room: values.room
       };
       
-      // Add facultyId if not provided (for faculty users creating new subjects)
-      if (!subjectData.facultyId && role === 'faculty') {
-        subjectData.facultyId = user?.id;
-        subjectData.faculty = user?.name;
+      // For faculty users, ensure their own information is used
+      if (role === 'faculty' && user) {
+        subjectData.facultyId = user.id;
+        subjectData.faculty = user.name || user.username;
       }
       
       // Ensure facultyId and faculty fields are present
@@ -345,263 +355,267 @@ const ManageSubjects = () => {
   };
 
   return (
-    <div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-        <Title level={2}>
-          {role === 'admin' ? 'Manage All Subjects' : 'My Subjects'}
-        </Title>
-        <Button 
-          type="primary" 
-          icon={<PlusOutlined />} 
-          onClick={() => showModal()}
-        >
-          Add Subject
-        </Button>
-      </div>
-      
-      {/* Search Form (Admin only) */}
-      {role === 'admin' && (
-        <Card style={{ marginBottom: 16 }}>
-          <Form
-            form={searchForm}
-            layout="horizontal"
-            onFinish={handleSearch}
+    <App>
+      <div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+          <Title level={2}>
+            {role === 'admin' ? 'Manage All Subjects' : 'My Subjects'}
+          </Title>
+          <Button 
+            type="primary" 
+            icon={<PlusOutlined />} 
+            onClick={() => showModal()}
           >
-            <Row gutter={24}>
-              <Col xs={24} sm={8}>
-                <Form.Item name="code" label="Subject Code">
-                  <Input placeholder="Search by code" />
+            Add Subject
+          </Button>
+        </div>
+        
+        {/* Search Form (Admin only) */}
+        {role === 'admin' && (
+          <Card style={{ marginBottom: 16 }}>
+            <Form
+              form={searchForm}
+              layout="horizontal"
+              onFinish={handleSearch}
+            >
+              <Row gutter={24}>
+                <Col xs={24} sm={8}>
+                  <Form.Item name="code" label="Subject Code">
+                    <Input placeholder="Search by code" />
+                  </Form.Item>
+                </Col>
+                <Col xs={24} sm={8}>
+                  <Form.Item name="name" label="Subject Name">
+                    <Input placeholder="Search by name" />
+                  </Form.Item>
+                </Col>
+                <Col xs={24} sm={8}>
+                  <Form.Item name="status" label="Status">
+                    <Select placeholder="Filter by status" allowClear>
+                      <Option value="active">Active</Option>
+                      <Option value="inactive">Inactive</Option>
+                    </Select>
+                  </Form.Item>
+                </Col>
+              </Row>
+              <Row>
+                <Col span={24} style={{ textAlign: 'right' }}>
+                  <Space>
+                    <Button onClick={resetSearch}>Reset</Button>
+                    <Button type="primary" icon={<SearchOutlined />} htmlType="submit">
+                      Search
+                    </Button>
+                  </Space>
+                </Col>
+              </Row>
+            </Form>
+          </Card>
+        )}
+        
+        <Card>
+          {role === 'faculty' && (
+            <div style={{ marginBottom: 16 }}>
+              <Tag color="blue">Note: As a faculty member, you can only manage your own subjects.</Tag>
+            </div>
+          )}
+          
+          <DataLoader
+            loading={fetchLoading}
+            error={fetchError}
+            data={subjects}
+            emptyMessage="No subjects found"
+          >
+            <Table 
+              columns={columns} 
+              dataSource={subjects} 
+              rowKey="_id"
+              pagination={{
+                defaultPageSize: 10,
+                showSizeChanger: true,
+                pageSizeOptions: ['10', '20', '50'],
+                showTotal: (total, range) => `${range[0]}-${range[1]} of ${total} items`
+              }}
+            />
+          </DataLoader>
+        </Card>
+
+        <Modal
+          title={editingSubject ? "Edit Subject" : "Add New Subject"}
+          open={isModalVisible}
+          onCancel={handleCancel}
+          footer={null}
+          width={800}
+        >
+          <Form
+            form={form}
+            layout="vertical"
+            onFinish={handleSave}
+            validateMessages={{
+              required: '${label} is required!',
+              types: {
+                number: '${label} must be a valid number!'
+              }
+            }}
+          >
+            <Row gutter={16}>
+              <Col span={12}>
+                <Form.Item
+                  name="code"
+                  label="Subject Code"
+                  rules={[{ required: true }]}
+                >
+                  <Input placeholder="Enter subject code (e.g. MATH101)" />
                 </Form.Item>
               </Col>
-              <Col xs={24} sm={8}>
-                <Form.Item name="name" label="Subject Name">
-                  <Input placeholder="Search by name" />
+              <Col span={12}>
+                <Form.Item
+                  name="name"
+                  label="Subject Name"
+                  rules={[{ required: true }]}
+                >
+                  <Input placeholder="Enter subject name" />
                 </Form.Item>
               </Col>
-              <Col xs={24} sm={8}>
-                <Form.Item name="status" label="Status">
-                  <Select placeholder="Filter by status" allowClear>
+            </Row>
+            
+            <Row gutter={16}>
+              <Col span={12}>
+                {role === 'admin' ? (
+                  <Form.Item
+                    label="Faculty"
+                    required
+                    tooltip="Select the faculty member for this subject"
+                  >
+                    <Form.Item 
+                      name="facultyId"
+                      noStyle
+                      rules={[{ required: true, message: 'Please select a faculty member' }]}
+                    >
+                      <Select 
+                        placeholder="Select faculty member"
+                        loading={facultyLoading}
+                        onChange={handleFacultyChange}
+                        optionFilterProp="label"
+                        showSearch
+                      >
+                        {faculty.map(f => (
+                          <Option key={f._id} value={f._id} label={f.name}>
+                            {f.name} ({f.department})
+                          </Option>
+                        ))}
+                      </Select>
+                    </Form.Item>
+                    <Form.Item name="faculty" hidden>
+                      <Input />
+                    </Form.Item>
+                  </Form.Item>
+                ) : (
+                  <>
+                    <Form.Item
+                      name="faculty"
+                      label="Faculty"
+                      rules={[{ required: true }]}
+                    >
+                      <Input 
+                        placeholder="Faculty name" 
+                        disabled={true}
+                        style={styles.disabledInputWithValue}
+                      />
+                    </Form.Item>
+                    <Form.Item name="facultyId" hidden={true}>
+                      <Input />
+                    </Form.Item>
+                  </>
+                )}
+              </Col>
+              <Col span={12}>
+                <Form.Item
+                  name="enrolledStudents"
+                  label="Enrolled Students"
+                  rules={[{ required: true, type: 'number', min: 0 }]}
+                >
+                  <InputNumber min={0} style={{ width: '100%' }} placeholder="Enter number of enrolled students" />
+                </Form.Item>
+              </Col>
+            </Row>
+            
+            {/* Schedule Fields */}
+            <Row gutter={16}>
+              <Col span={12}>
+                <Form.Item
+                  name="days"
+                  label="Days"
+                  rules={[{ required: true, type: 'array', min: 1, message: 'Please select at least one day' }]}
+                >
+                  <Select 
+                    mode="multiple" 
+                    placeholder="Select days"
+                    options={dayOptions}
+                  />
+                </Form.Item>
+              </Col>
+              <Col span={12}>
+                <Form.Item
+                  name="time"
+                  label="Time"
+                  rules={[{ required: true }]}
+                >
+                  <RangePicker 
+                    format="HH:mm"
+                    placeholder={['Start Time', 'End Time']}
+                    style={{ width: '100%' }}
+                  />
+                </Form.Item>
+              </Col>
+            </Row>
+            
+            <Row gutter={16}>
+              <Col span={12}>
+                <Form.Item
+                  name="room"
+                  label="Room"
+                  rules={[{ required: true }]}
+                >
+                  <Select placeholder="Select room">
+                    {roomOptions.map(room => (
+                      <Option key={room} value={room}>{room}</Option>
+                    ))}
+                  </Select>
+                </Form.Item>
+              </Col>
+              <Col span={12}>
+                <Form.Item
+                  name="status"
+                  label="Status"
+                  rules={[{ required: true }]}
+                  initialValue="active"
+                >
+                  <Select placeholder="Select status">
                     <Option value="active">Active</Option>
                     <Option value="inactive">Inactive</Option>
                   </Select>
                 </Form.Item>
               </Col>
             </Row>
-            <Row>
-              <Col span={24} style={{ textAlign: 'right' }}>
-                <Space>
-                  <Button onClick={resetSearch}>Reset</Button>
-                  <Button type="primary" icon={<SearchOutlined />} htmlType="submit">
-                    Search
-                  </Button>
-                </Space>
-              </Col>
-            </Row>
-          </Form>
-        </Card>
-      )}
-      
-      <Card>
-        {role === 'faculty' && (
-          <div style={{ marginBottom: 16 }}>
-            <Tag color="blue">Note: As a faculty member, you can only manage your own subjects.</Tag>
-          </div>
-        )}
-        
-        <DataLoader
-          loading={fetchLoading}
-          error={fetchError}
-          data={subjects}
-          emptyMessage="No subjects found"
-        >
-          <Table 
-            columns={columns} 
-            dataSource={subjects} 
-            rowKey="_id"
-            pagination={{
-              defaultPageSize: 10,
-              showSizeChanger: true,
-              pageSizeOptions: ['10', '20', '50'],
-              showTotal: (total, range) => `${range[0]}-${range[1]} of ${total} items`
-            }}
-          />
-        </DataLoader>
-      </Card>
-
-      <Modal
-        title={editingSubject ? "Edit Subject" : "Add New Subject"}
-        open={isModalVisible}
-        onCancel={handleCancel}
-        footer={null}
-        width={800}
-      >
-        <Form
-          form={form}
-          layout="vertical"
-          onFinish={handleSave}
-          validateMessages={{
-            required: '${label} is required!',
-            types: {
-              number: '${label} must be a valid number!'
-            }
-          }}
-        >
-          <Row gutter={16}>
-            <Col span={12}>
-              <Form.Item
-                name="code"
-                label="Subject Code"
-                rules={[{ required: true }]}
-              >
-                <Input placeholder="Enter subject code (e.g. MATH101)" />
-              </Form.Item>
-            </Col>
-            <Col span={12}>
-              <Form.Item
-                name="name"
-                label="Subject Name"
-                rules={[{ required: true }]}
-              >
-                <Input placeholder="Enter subject name" />
-              </Form.Item>
-            </Col>
-          </Row>
-          
-          <Row gutter={16}>
-            <Col span={12}>
-              {role === 'admin' ? (
-                <Form.Item
-                  label="Faculty"
-                  required
-                  tooltip="Select the faculty member for this subject"
+            
+            <Divider />
+            
+            <Form.Item style={{ marginBottom: 0, textAlign: 'right' }}>
+              <Space>
+                <Button onClick={handleCancel}>Cancel</Button>
+                <Button 
+                  type="primary" 
+                  htmlType="submit" 
+                  loading={submitLoading}
                 >
-                  <Form.Item 
-                    name="facultyId"
-                    noStyle
-                    rules={[{ required: true, message: 'Please select a faculty member' }]}
-                  >
-                    <Select 
-                      placeholder="Select faculty member"
-                      loading={facultyLoading}
-                      onChange={handleFacultyChange}
-                      optionFilterProp="label"
-                      showSearch
-                    >
-                      {faculty.map(f => (
-                        <Option key={f._id} value={f._id} label={f.name}>
-                          {f.name} ({f.department})
-                        </Option>
-                      ))}
-                    </Select>
-                  </Form.Item>
-                  <Form.Item name="faculty" hidden>
-                    <Input />
-                  </Form.Item>
-                </Form.Item>
-              ) : (
-                <>
-                  <Form.Item
-                    name="faculty"
-                    label="Faculty"
-                    rules={[{ required: true }]}
-                    disabled={role === 'faculty'}
-                  >
-                    <Input placeholder="Enter faculty name" disabled={role === 'faculty'} />
-                  </Form.Item>
-                  {/* Hidden field to store facultyId */}
-                  <Form.Item name="facultyId" hidden={true}>
-                    <Input />
-                  </Form.Item>
-                </>
-              )}
-            </Col>
-            <Col span={12}>
-              <Form.Item
-                name="enrolledStudents"
-                label="Enrolled Students"
-                rules={[{ required: true, type: 'number', min: 0 }]}
-              >
-                <InputNumber min={0} style={{ width: '100%' }} placeholder="Enter number of enrolled students" />
-              </Form.Item>
-            </Col>
-          </Row>
-          
-          {/* Schedule Fields */}
-          <Row gutter={16}>
-            <Col span={12}>
-              <Form.Item
-                name="days"
-                label="Days"
-                rules={[{ required: true, type: 'array', min: 1, message: 'Please select at least one day' }]}
-              >
-                <Select 
-                  mode="multiple" 
-                  placeholder="Select days"
-                  options={dayOptions}
-                />
-              </Form.Item>
-            </Col>
-            <Col span={12}>
-              <Form.Item
-                name="time"
-                label="Time"
-                rules={[{ required: true }]}
-              >
-                <RangePicker 
-                  format="HH:mm"
-                  placeholder={['Start Time', 'End Time']}
-                  style={{ width: '100%' }}
-                />
-              </Form.Item>
-            </Col>
-          </Row>
-          
-          <Row gutter={16}>
-            <Col span={12}>
-              <Form.Item
-                name="room"
-                label="Room"
-                rules={[{ required: true }]}
-              >
-                <Select placeholder="Select room">
-                  {roomOptions.map(room => (
-                    <Option key={room} value={room}>{room}</Option>
-                  ))}
-                </Select>
-              </Form.Item>
-            </Col>
-            <Col span={12}>
-              <Form.Item
-                name="status"
-                label="Status"
-                rules={[{ required: true }]}
-                initialValue="active"
-              >
-                <Select placeholder="Select status">
-                  <Option value="active">Active</Option>
-                  <Option value="inactive">Inactive</Option>
-                </Select>
-              </Form.Item>
-            </Col>
-          </Row>
-          
-          <Divider />
-          
-          <Form.Item style={{ marginBottom: 0, textAlign: 'right' }}>
-            <Space>
-              <Button onClick={handleCancel}>Cancel</Button>
-              <Button 
-                type="primary" 
-                htmlType="submit" 
-                loading={submitLoading}
-              >
-                {editingSubject ? 'Update' : 'Create'}
-              </Button>
-            </Space>
-          </Form.Item>
-        </Form>
-      </Modal>
-    </div>
+                  {editingSubject ? 'Update' : 'Create'}
+                </Button>
+              </Space>
+            </Form.Item>
+          </Form>
+        </Modal>
+      </div>
+    </App>
   );
 };
 

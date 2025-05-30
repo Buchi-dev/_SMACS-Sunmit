@@ -4,13 +4,14 @@ const Faculty = require('../models/Faculty');
 // Get all subjects
 exports.getAllSubjects = async (req, res) => {
   try {
-    const { code, name, status } = req.query;
+    const { code, name, status, facultyId } = req.query;
     const filter = {};
     
     // Apply filters if provided
     if (code) filter.code = { $regex: code, $options: 'i' };
     if (name) filter.name = { $regex: name, $options: 'i' };
     if (status) filter.status = status;
+    if (facultyId) filter.facultyId = facultyId;
     
     const subjects = await Subject.find(filter).sort({ code: 1 });
     
