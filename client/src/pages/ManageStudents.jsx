@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   Typography, 
   Button, 
@@ -28,6 +28,13 @@ import {
   CalendarOutlined,
   IdcardOutlined
 } from '@ant-design/icons';
+import useFetch from '../hooks/useFetch';
+import { 
+  getAllStudents, 
+  createStudent, 
+  updateStudent, 
+  deleteStudent 
+} from '../services/api';
 
 const { Title } = Typography;
 const { Option } = Select;
@@ -35,45 +42,29 @@ const { Option } = Select;
 const ManageStudents = () => {
   const [form] = Form.useForm();
   const [searchForm] = Form.useForm();
-  const [students, setStudents] = useState([
-    { 
-      id: 1, 
-      rollNumber: 'STD001', 
-      name: 'John Doe',
-      nfcId: 'NFC001',
-      year: '1st Year',
-      course: 'Computer Science',
-      class: 'A',
-      status: 'active',
-      subjects: ['Mathematics', 'Physics']
-    },
-    { 
-      id: 2, 
-      rollNumber: 'STD002', 
-      name: 'Jane Smith',
-      nfcId: 'NFC002',
-      year: '2nd Year',
-      course: 'Information Technology',
-      class: 'B',
-      status: 'active',
-      subjects: ['Mathematics', 'Computer Science']
-    },
-    { 
-      id: 3, 
-      rollNumber: 'STD003', 
-      name: 'Michael Johnson',
-      nfcId: 'NFC003',
-      year: '3rd Year',
-      course: 'Computer Science',
-      class: 'A',
-      status: 'inactive',
-      subjects: ['Physics', 'Chemistry']
-    },
-  ]);
-  const [filteredStudents, setFilteredStudents] = useState([...students]);
   const [isModalVisible, setIsModalVisible] = useState(false);
   const [editingStudent, setEditingStudent] = useState(null);
-  const [loading, setLoading] = useState(false);
+  const [searchParams, setSearchParams] = useState({});
+
+  // Fetch students data
+  const { 
+    data: studentsData,
+    loading: fetchLoading,
+    error: fetchError,
+    refetch: refetchStudents
+  } = useFetch(getAllStudents, {
+    initialParams: searchParams,
+    dependencies: [searchParams]
+  });
+
+  // Extract students array from API response
+  const students = studentsData?.data || [];
+
+  useEffect(() => {
+    if (fetchError) {
+      message.error('Failed to fetch students: ' + fetchError);
+    }
+  }, [fetchError]);
 
   // Available subjects
   const subjectOptions = [
@@ -135,86 +126,61 @@ const ManageStudents = () => {
   };
 
   const handleSearch = (values) => {
-    const filtered = students.filter(student => {
-      const matchName = !values.name || student.name.toLowerCase().includes(values.name.toLowerCase());
-      const matchYear = !values.year || student.year === values.year;
-      const matchCourse = !values.course || student.course === values.course;
-      const matchClass = !values.class || student.class === values.class;
-      const matchStatus = !values.status || student.status === values.status;
-      const matchSubject = !values.subject || (student.subjects && student.subjects.includes(values.subject));
-      const matchNfcId = !values.nfcId || student.nfcId.toLowerCase().includes(values.nfcId.toLowerCase());
-      return matchName && matchYear && matchCourse && matchClass && matchStatus && matchSubject && matchNfcId;
-    });
-    setFilteredStudents(filtered);
+    setSearchParams(values);
   };
 
   const resetSearch = () => {
     searchForm.resetFields();
-    setFilteredStudents([...students]);
+    setSearchParams({});
   };
 
-  const handleSave = (values) => {
-    setLoading(true);
-    
-    // Ensure subjects is an array
-    const studentData = {
-      ...values,
-      subjects: values.subjects || []
-    };
-    
-    // Simulate API call
-    setTimeout(() => {
+  const handleSave = async (values) => {
+    try {
+      // Ensure subjects is an array
+      const studentData = {
+        ...values,
+        subjects: values.subjects || []
+      };
+      
       if (editingStudent) {
         // Update existing student
-        const updatedStudents = students.map(student => 
-          student.id === editingStudent.id ? { ...student, ...studentData } : student
-        );
-        setStudents(updatedStudents);
-        setFilteredStudents(updatedStudents);
+        await updateStudent(editingStudent._id, studentData);
         message.success('Student updated successfully!');
       } else {
         // Create new student
-        const newStudent = {
-          id: Math.max(...students.map(s => s.id)) + 1,
-          ...studentData,
-        };
-        const updatedStudents = [...students, newStudent];
-        setStudents(updatedStudents);
-        setFilteredStudents(updatedStudents);
+        await createStudent(studentData);
         message.success('Student added successfully!');
       }
+      
       setIsModalVisible(false);
-      setLoading(false);
       form.resetFields();
-    }, 500);
+      refetchStudents();
+    } catch (error) {
+      const errorMsg = error.response?.data?.message || 'Operation failed';
+      message.error(errorMsg);
+    }
   };
 
-  const handleDelete = (studentId) => {
-    setLoading(true);
-    
-    // Simulate API call
-    setTimeout(() => {
-      const updatedStudents = students.filter(student => student.id !== studentId);
-      setStudents(updatedStudents);
-      setFilteredStudents(updatedStudents);
+  const handleDelete = async (studentId) => {
+    try {
+      await deleteStudent(studentId);
       message.success('Student deleted successfully!');
-      setLoading(false);
-    }, 500);
+      refetchStudents();
+    } catch (error) {
+      const errorMsg = error.response?.data?.message || 'Delete failed';
+      message.error(errorMsg);
+    }
   };
 
-  const handleStatusChange = (studentId, newStatus) => {
-    setLoading(true);
-    
-    // Simulate API call
-    setTimeout(() => {
-      const updatedStudents = students.map(student => 
-        student.id === studentId ? { ...student, status: newStatus } : student
-      );
-      setStudents(updatedStudents);
-      setFilteredStudents(updatedStudents);
+  const handleStatusChange = async (studentId, newStatus) => {
+    try {
+      await updateStudent(studentId, { status: newStatus });
       message.success(`Student ${newStatus === 'active' ? 'activated' : 'deactivated'} successfully!`);
-      setLoading(false);
-    }, 500);
+      refetchStudents();
+    } catch (error) {
+      const errorMsg = error.response?.data?.message || 'Status update failed';
+      message.error(errorMsg);
+    }
   };
 
   const columns = [
@@ -234,18 +200,6 @@ const ManageStudents = () => {
         </Space>
       ),
     },
-    // THE NFC ID must Not Show in the Table
-    // {
-    //   title: 'NFC ID',
-    //   dataIndex: 'nfcId',
-    //   key: 'nfcId',
-    //   render: (nfcId) => (
-    //     <Space>
-    //       <IdcardOutlined />
-    //       {nfcId}
-    //     </Space>
-    //   )
-    // },
     {
       title: 'Year',
       dataIndex: 'year',
@@ -303,7 +257,7 @@ const ManageStudents = () => {
           <Tooltip title="Delete Student">
             <Popconfirm
               title="Are you sure you want to delete this student?"
-              onConfirm={() => handleDelete(record.id)}
+              onConfirm={() => handleDelete(record._id)}
               okText="Yes"
               cancelText="No"
             >
@@ -413,9 +367,9 @@ const ManageStudents = () => {
       <Card>
         <Table 
           columns={columns} 
-          dataSource={filteredStudents} 
-          rowKey="id"
-          loading={loading}
+          dataSource={students} 
+          rowKey="_id"
+          loading={fetchLoading}
         />
       </Card>
 
@@ -545,7 +499,11 @@ const ManageStudents = () => {
           <Form.Item style={{ marginBottom: 0, textAlign: 'right' }}>
             <Space>
               <Button onClick={handleCancel}>Cancel</Button>
-              <Button type="primary" htmlType="submit" loading={loading}>
+              <Button 
+                type="primary" 
+                htmlType="submit" 
+                loading={fetchLoading}
+              >
                 {editingStudent ? 'Update' : 'Create'}
               </Button>
             </Space>

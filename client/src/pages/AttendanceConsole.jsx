@@ -15,7 +15,8 @@ import {
   Select,
   message,
   List,
-  Avatar
+  Avatar,
+  Empty
 } from 'antd';
 import { 
   UserOutlined, 
@@ -26,6 +27,10 @@ import {
   TeamOutlined
 } from '@ant-design/icons';
 import dayjs from 'dayjs';
+import { useAttendance } from '../context/AttendanceContext';
+import { useAuth } from '../context/AuthContext';
+import useFetch from '../hooks/useFetch';
+import { getStudentByNfcId, getAllSubjects, getSubjectsByFaculty } from '../services/api';
 
 const { Title, Text } = Typography;
 const { Option } = Select;
@@ -35,105 +40,42 @@ const AttendanceConsole = () => {
   const [studentId, setStudentId] = useState('');
   const [currentStudent, setCurrentStudent] = useState(null);
   const [selectedSubject, setSelectedSubject] = useState(null);
-  const [recentCheckins, setRecentCheckins] = useState([
-    {
-      id: 1,
-      studentId: 'S001',
-      name: 'John Doe',
-      course: 'BS Computer Science',
-      section: 'CS-1A',
-      subject: 'Mathematics 101',
-      time: '09:15:32',
-      date: dayjs().format('YYYY-MM-DD')
-    },
-    {
-      id: 2,
-      studentId: 'S002',
-      name: 'Jane Smith',
-      course: 'BS Information Technology',
-      section: 'IT-2B',
-      subject: 'Introduction to Programming',
-      time: '09:05:47',
-      date: dayjs().format('YYYY-MM-DD')
-    },
-    {
-      id: 3,
-      studentId: 'S003',
-      name: 'Michael Johnson',
-      course: 'BS Computer Science',
-      section: 'CS-1A',
-      subject: 'Database Systems',
-      time: '08:58:21',
-      date: dayjs().format('YYYY-MM-DD')
-    },
-    {
-      id: 4,
-      studentId: 'S004',
-      name: 'Emily Davis',
-      course: 'BS Information Systems',
-      section: 'IS-3C',
-      subject: 'Web Development',
-      time: '08:45:09',
-      date: dayjs().format('YYYY-MM-DD')
-    },
-    {
-      id: 5,
-      studentId: 'S005',
-      name: 'Robert Brown',
-      course: 'BS Information Technology',
-      section: 'IT-2B',
-      subject: 'Data Structures',
-      time: '08:30:55',
-      date: dayjs().format('YYYY-MM-DD')
-    },
-    {
-      id: 6,
-      studentId: 'S001',
-      name: 'John Doe',
-      course: 'BS Computer Science',
-      section: 'CS-1A',
-      subject: 'Database Systems',
-      time: '10:22:17',
-      date: dayjs().subtract(1, 'day').format('YYYY-MM-DD')
-    },
-    {
-      id: 7,
-      studentId: 'S003',
-      name: 'Michael Johnson',
-      course: 'BS Computer Science',
-      section: 'CS-1A',
-      subject: 'Mathematics 101',
-      time: '09:33:40',
-      date: dayjs().subtract(1, 'day').format('YYYY-MM-DD')
-    },
-    {
-      id: 8,
-      studentId: 'S002',
-      name: 'Jane Smith',
-      course: 'BS Information Technology',
-      section: 'IT-2B',
-      subject: 'Web Development',
-      time: '13:15:05',
-      date: dayjs().subtract(1, 'day').format('YYYY-MM-DD')
-    }
-  ]);
-  const [loading, setLoading] = useState(false);
-  const [subjects, setSubjects] = useState([]);
   const [scanMode, setScanMode] = useState(false);
+  const [studentLoading, setStudentLoading] = useState(false);
   const inputRef = useRef(null);
+  const { user, role } = useAuth();
+  
+  // Use Attendance Context
+  const { 
+    recordAttendance, 
+    recentCheckins, 
+    loading: attendanceLoading, 
+    currentSession,
+    startSession,
+    endSession,
+    error: attendanceError,
+    fetchRecentCheckins
+  } = useAttendance();
 
-  // Simulated data - replace with actual API calls in production
-  const studentData = [
-    { id: 'S001', name: 'John Doe', course: 'BS Computer Science', section: 'CS-1A', img: null },
-    { id: 'S002', name: 'Jane Smith', course: 'BS Information Technology', section: 'IT-2B', img: null },
-    { id: 'S003', name: 'Michael Johnson', course: 'BS Computer Science', section: 'CS-1A', img: null },
-    { id: 'S004', name: 'Emily Davis', course: 'BS Information Systems', section: 'IS-3C', img: null },
-    { id: 'S005', name: 'Robert Brown', course: 'BS Information Technology', section: 'IT-2B', img: null },
-  ];
+  // Fetch subjects based on role
+  const { 
+    data: subjectsData,
+    loading: subjectsLoading,
+    error: subjectsError
+  } = useFetch(
+    role === 'admin' ? getAllSubjects : getSubjectsByFaculty, 
+    {
+      initialParams: role === 'admin' ? {} : user?.id,
+      dependencies: [role, user?.id]
+    }
+  );
+
+  // Extract subjects array
+  const subjects = subjectsData?.data || [];
 
   useEffect(() => {
-    // Load subjects on component mount
-    fetchSubjects();
+    // Fetch recent check-ins when component mounts
+    fetchRecentCheckins();
     
     // Check if we have a selected subject in localStorage (from AttendancePanel)
     const storedSubject = localStorage.getItem('selectedSubject');
@@ -144,11 +86,16 @@ const AttendanceConsole = () => {
         // Set scan mode active if coming from AttendancePanel
         setScanMode(true);
         
-        // We'll set the selected subject after subjects are loaded
-        setTimeout(() => {
-          setSelectedSubject(subjectData.id);
-          message.info(`Ready to take attendance for ${subjectData.name}`);
-        }, 600);
+        // Set the selected subject and start a session
+        setSelectedSubject(subjectData.id);
+        startSession({
+          subjectId: subjectData.id,
+          subjectName: subjectData.name,
+          facultyId: user?.id,
+          facultyName: user?.name
+        });
+        
+        message.info(`Ready to take attendance for ${subjectData.name}`);
         
         // Clear the stored subject to avoid reusing it on page refresh
         localStorage.removeItem('selectedSubject');
@@ -165,274 +112,292 @@ const AttendanceConsole = () => {
     }
   }, [scanMode]);
 
-  const fetchSubjects = () => {
-    // Simulated API call to fetch subjects
-    setTimeout(() => {
-      const subjectData = [
-        { id: 1, name: 'Mathematics 101', schedule: 'MWF 09:00-10:30', room: 'Room 101' },
-        { id: 2, name: 'Introduction to Programming', schedule: 'TTh 10:30-12:00', room: 'Computer Lab 1' },
-        { id: 3, name: 'Database Systems', schedule: 'MW 13:00-14:30', room: 'Room 203' },
-        { id: 4, name: 'Web Development', schedule: 'TTh 15:00-16:30', room: 'Computer Lab 2' },
-        { id: 5, name: 'Data Structures', schedule: 'MWF 11:00-12:30', room: 'Room 105' },
-      ];
-      setSubjects(subjectData);
-    }, 500);
-  };
-
-  const handleIdScan = (value) => {
-    if (!value) return;
+  // Handle NFC ID scan
+  const handleIdScan = async (value) => {
+    if (!value || !selectedSubject) {
+      message.warning('Please select a subject first');
+      return;
+    }
     
-    setLoading(true);
+    setStudentLoading(true);
     setStudentId(value);
     
-    // Simulate API call to fetch student data
-    setTimeout(() => {
-      const student = studentData.find(s => s.id === value);
+    try {
+      // Get student by NFC ID
+      const response = await getStudentByNfcId(value);
       
-      if (student) {
+      if (response.data.success) {
+        const student = response.data.data;
         setCurrentStudent(student);
-        recordAttendance(student);
-        message.success(`Successfully scanned ID for ${student.name}`);
+        
+        // Record attendance using the context
+        const selectedSubjectObj = subjects.find(s => s._id === selectedSubject);
+        
+        await recordAttendance({
+          studentId: student._id,
+          studentName: student.name,
+          studentRollNumber: student.rollNumber,
+          subjectId: selectedSubject,
+          subjectName: selectedSubjectObj?.name || 'Unknown Subject',
+          facultyId: user?.id,
+          facultyName: user?.name,
+          nfcId: value,
+          course: student.course,
+          section: student.class
+        });
+        
+        message.success(`Successfully recorded attendance for ${student.name}`);
       } else {
         setCurrentStudent(null);
         message.error('Student ID not found');
       }
-      
-      setLoading(false);
+    } catch (error) {
+      console.error('Error scanning student ID:', error);
+      message.error('Failed to scan student ID');
+    } finally {
+      setStudentLoading(false);
       
       // Clear input after processing
       setStudentId('');
       if (inputRef.current) {
         inputRef.current.focus();
       }
-    }, 800);
-  };
-
-  const recordAttendance = (student) => {
-    if (!selectedSubject) {
-      message.warning('No subject selected. Please select a subject first.');
-      return;
     }
-    
-    // Simulate API call to record attendance
-    const timestamp = dayjs().format('HH:mm:ss');
-    const date = dayjs().format('YYYY-MM-DD');
-    
-    const newCheckin = {
-      id: Date.now(),
-      studentId: student.id,
-      name: student.name,
-      course: student.course,
-      section: student.section,
-      subject: subjects.find(s => s.id === selectedSubject)?.name || 'Unknown Subject',
-      time: timestamp,
-      date: date
-    };
-    
-    // Add to recent check-ins at the beginning of the array
-    setRecentCheckins(prev => [newCheckin, ...prev].slice(0, 20));
   };
 
   const toggleScanMode = () => {
+    if (!scanMode && !selectedSubject) {
+      message.warning('Please select a subject first');
+      return;
+    }
+    
+    if (scanMode) {
+      // Ending session
+      endSession();
+      message.info('Attendance session ended');
+    } else {
+      // Starting session
+      const selectedSubjectObj = subjects.find(s => s._id === selectedSubject);
+      if (selectedSubjectObj) {
+        startSession({
+          subjectId: selectedSubject,
+          subjectName: selectedSubjectObj.name,
+          facultyId: user?.id,
+          facultyName: user?.name
+        });
+        message.info(`Started attendance session for ${selectedSubjectObj.name}`);
+      }
+    }
+    
     setScanMode(prev => !prev);
   };
 
   const handleSubjectChange = (value) => {
     setSelectedSubject(value);
+    
+    // End current session if there is one
+    if (currentSession) {
+      endSession();
+    }
+    
+    // Start new session if in scan mode
+    if (scanMode) {
+      const selectedSubjectObj = subjects.find(s => s._id === value);
+      if (selectedSubjectObj) {
+        startSession({
+          subjectId: value,
+          subjectName: selectedSubjectObj.name,
+          facultyId: user?.id,
+          facultyName: user?.name
+        });
+      }
+    }
   };
 
   const columns = [
     {
       title: 'Time',
-      dataIndex: 'time',
-      key: 'time',
-      render: (time) => (
+      dataIndex: 'timestamp',
+      key: 'timestamp',
+      render: (timestamp) => (
         <Space>
           <ClockCircleOutlined />
-          {time}
+          {dayjs(timestamp).format('HH:mm:ss')}
         </Space>
-      )
+      ),
     },
     {
       title: 'Student ID',
-      dataIndex: 'studentId',
-      key: 'studentId',
+      dataIndex: 'studentRollNumber',
+      key: 'studentRollNumber',
     },
     {
       title: 'Name',
-      dataIndex: 'name',
-      key: 'name',
+      dataIndex: 'studentName',
+      key: 'studentName',
+      render: (name) => (
+        <Space>
+          <Avatar icon={<UserOutlined />} />
+          {name}
+        </Space>
+      ),
     },
     {
-      title: 'Course & Section',
-      key: 'courseSection',
-      render: (_, record) => (
-        <Text>{record.course} - {record.section}</Text>
-      )
+      title: 'Course',
+      dataIndex: 'course',
+      key: 'course',
     },
     {
       title: 'Subject',
-      dataIndex: 'subject',
-      key: 'subject',
+      dataIndex: 'subjectName',
+      key: 'subjectName',
       render: (subject) => (
-        <Tag color="blue">{subject}</Tag>
-      )
+        <Space>
+          <BookOutlined />
+          {subject}
+        </Space>
+      ),
     },
     {
       title: 'Status',
       key: 'status',
-      render: () => (
-        <Tag color="green">
-          <CheckCircleOutlined /> Present
-        </Tag>
-      )
-    }
+      render: () => <Tag color="green">PRESENT</Tag>,
+    },
   ];
 
   return (
-    <div style={{ padding: '20px' }}>
-      <Title level={2}>
-        <ScanOutlined /> Attendance Console
-      </Title>
+    <div>
+      <Title level={2}>Attendance Console</Title>
       
-      <Row gutter={[16, 16]}>
-        <Col xs={24} lg={16}>
-          <Card title="ID Scan Terminal" bordered={false}>
-            <Space direction="vertical" style={{ width: '100%' }} size="large">
-              <Alert
-                message="Please select a subject before scanning student IDs"
-                type="info"
-                showIcon
-              />
-              
-              <Row gutter={16}>
-                <Col span={16}>
-                  <Select
-                    placeholder="Select Subject"
-                    style={{ width: '100%' }}
-                    onChange={handleSubjectChange}
-                    value={selectedSubject}
-                  >
-                    {subjects.map(subject => (
-                      <Option key={subject.id} value={subject.id}>
-                        {subject.name} - {subject.schedule} ({subject.room})
-                      </Option>
-                    ))}
-                  </Select>
-                </Col>
-                <Col span={8}>
-                  <Button 
-                    type={scanMode ? "primary" : "default"} 
-                    icon={<ScanOutlined />} 
-                    onClick={toggleScanMode}
-                    block
-                  >
-                    {scanMode ? "Scanning Active" : "Start Scanning"}
-                  </Button>
-                </Col>
-              </Row>
-              
-              {scanMode && (
-                <>
-                  <Divider>Scan Student ID</Divider>
+      {attendanceError && (
+        <Alert 
+          message="Error" 
+          description={attendanceError} 
+          type="error" 
+          showIcon 
+          style={{ marginBottom: 16 }} 
+        />
+      )}
+      
+      <Card style={{ marginBottom: 16 }}>
+        <Row gutter={[16, 16]}>
+          <Col xs={24} sm={8}>
+            <Card 
+              title={<><BookOutlined /> Select Subject</>} 
+              type="inner"
+            >
+              <Select
+                placeholder="Select a subject"
+                style={{ width: '100%' }}
+                value={selectedSubject}
+                onChange={handleSubjectChange}
+                loading={subjectsLoading}
+                disabled={scanMode}
+              >
+                {subjects.map(subject => (
+                  <Option key={subject._id} value={subject._id}>
+                    {subject.name} ({subject.code})
+                  </Option>
+                ))}
+              </Select>
+            </Card>
+          </Col>
+          
+          <Col xs={24} sm={16}>
+            <Card 
+              title={<><ScanOutlined /> Scan Student ID</>} 
+              type="inner"
+              extra={
+                <Button 
+                  type={scanMode ? "danger" : "primary"}
+                  onClick={toggleScanMode}
+                  disabled={!selectedSubject}
+                >
+                  {scanMode ? "End Session" : "Start Session"}
+                </Button>
+              }
+            >
+              {scanMode ? (
+                <div>
+                  <Alert
+                    message="Scan Mode Active"
+                    description={`Scanning for ${subjects.find(s => s._id === selectedSubject)?.name || 'selected subject'}. Place NFC card near the reader.`}
+                    type="info"
+                    showIcon
+                    style={{ marginBottom: 16 }}
+                  />
                   <Search
                     ref={inputRef}
-                    placeholder="Scan or enter student ID"
-                    enterButton="Submit"
-                    size="large"
+                    placeholder="NFC ID will appear here..."
+                    enterButton="Record"
                     value={studentId}
                     onChange={(e) => setStudentId(e.target.value)}
                     onSearch={handleIdScan}
-                    loading={loading}
+                    loading={studentLoading}
                     autoFocus
                   />
-                </>
+                </div>
+              ) : (
+                <Empty 
+                  description="Select a subject and click Start Session to begin scanning" 
+                  image={Empty.PRESENTED_IMAGE_SIMPLE}
+                />
               )}
-              
-              {currentStudent && (
-                <>
-                  <Divider>Last Scanned Student</Divider>
-                  <Card>
-                    <Row gutter={16} align="middle">
-                      <Col span={4}>
-                        <Avatar 
-                          size={80} 
-                          icon={<UserOutlined />} 
-                          src={currentStudent.img} 
-                        />
-                      </Col>
-                      <Col span={20}>
-                        <Title level={4}>{currentStudent.name}</Title>
-                        <Space direction="vertical">
-                          <Text><strong>ID:</strong> {currentStudent.id}</Text>
-                          <Text><strong>Course:</strong> {currentStudent.course}</Text>
-                          <Text><strong>Section:</strong> {currentStudent.section}</Text>
-                          <Text>
-                            <strong>Checked in:</strong> {dayjs().format('HH:mm:ss')} - 
-                            <Tag color="green" style={{ marginLeft: 8 }}>
-                              <CheckCircleOutlined /> Attendance Recorded
-                            </Tag>
-                          </Text>
-                        </Space>
-                      </Col>
-                    </Row>
-                  </Card>
-                </>
-              )}
-            </Space>
-          </Card>
-        </Col>
-        
-        <Col xs={24} lg={8}>
-          <Card title="Attendance Statistics" bordered={false}>
-            <Row gutter={[16, 16]}>
-              <Col span={12}>
+            </Card>
+          </Col>
+        </Row>
+      </Card>
+      
+      <Card 
+        title={<><TeamOutlined /> Recent Check-ins</>}
+        extra={
+          <Button onClick={fetchRecentCheckins} loading={attendanceLoading}>
+            Refresh
+          </Button>
+        }
+      >
+        <Table 
+          columns={columns} 
+          dataSource={recentCheckins} 
+          rowKey="_id"
+          loading={attendanceLoading}
+          pagination={{ pageSize: 10 }}
+        />
+      </Card>
+      
+      <Divider />
+      
+      <Row gutter={16}>
+        <Col span={24}>
+          <Card title="Today's Statistics">
+            <Row gutter={16}>
+              <Col xs={24} md={8}>
                 <Statistic 
-                  title="Today's Check-ins" 
-                  value={recentCheckins.length} 
+                  title="Total Check-ins Today" 
+                  value={recentCheckins.filter(c => 
+                    dayjs(c.timestamp).isSame(dayjs(), 'day')
+                  ).length} 
                   prefix={<CheckCircleOutlined />} 
                 />
               </Col>
-              <Col span={12}>
+              <Col xs={24} md={8}>
                 <Statistic 
-                  title="Current Subject" 
-                  value={selectedSubject ? subjects.find(s => s.id === selectedSubject)?.name : 'None'} 
-                  prefix={<BookOutlined />}
+                  title="Active Session" 
+                  value={currentSession ? currentSession.subjectName : 'None'} 
                   valueStyle={{ fontSize: '16px' }}
                 />
               </Col>
-              <Col span={12}>
+              <Col xs={24} md={8}>
                 <Statistic 
-                  title="Current Time" 
-                  value={dayjs().format('HH:mm:ss')} 
-                  prefix={<ClockCircleOutlined />} 
-                />
-              </Col>
-              <Col span={12}>
-                <Statistic 
-                  title="Active Session" 
-                  value={scanMode ? 'Active' : 'Inactive'} 
-                  valueStyle={{ color: scanMode ? '#3f8600' : '#cf1322' }}
+                  title="Session Duration" 
+                  value={currentSession ? dayjs().diff(dayjs(currentSession.startTime), 'minute') : 0} 
+                  suffix="min" 
                 />
               </Col>
             </Row>
           </Card>
         </Col>
       </Row>
-      
-      <Divider orientation="left">
-        <Space>
-          <TeamOutlined />
-          Recent Check-ins
-        </Space>
-      </Divider>
-      
-      <Table 
-        columns={columns} 
-        dataSource={recentCheckins} 
-        rowKey="id"
-        pagination={{ pageSize: 10 }}
-      />
     </div>
   );
 };

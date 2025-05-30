@@ -1,32 +1,35 @@
 import React, { useState } from 'react';
-import { Form, Input, Button, Card, Typography, Layout, message, Radio } from 'antd';
+import { Form, Input, Button, Card, Typography, Layout, message, Radio, Spin } from 'antd';
 import { UserOutlined, LockOutlined } from '@ant-design/icons';
 import { Link, useNavigate } from 'react-router-dom';
+import { useAuth } from '../context/AuthContext';
 
 const { Title } = Typography;
 const { Content } = Layout;
 
-const Login = ({ onLogin }) => {
+const Login = () => {
   const navigate = useNavigate();
-  const [role, setRole] = useState('faculty');
+  const [loading, setLoading] = useState(false);
+  const { login } = useAuth();
 
-  const onFinish = (values) => {
-    console.log('Login form values:', values);
-    
-    // Simple validation for demo purposes
-    if (values.username === 'admin' && values.password === 'admin') {
-      message.success('Admin login successful!');
-      onLogin('admin');
-      navigate('/dashboard');
-    } else if (values.username === 'faculty' && values.password === 'faculty') {
-      message.success('Faculty login successful!');
-      onLogin('faculty');
-      navigate('/dashboard');
-    } else {
-      // For demo, also allow any credentials with selected role
-      message.success(`${role.charAt(0).toUpperCase() + role.slice(1)} login successful!`);
-      onLogin(role);
-      navigate('/dashboard');
+  const onFinish = async (values) => {
+    try {
+      setLoading(true);
+      const result = await login(values);
+      
+      if (result.success) {
+        // Navigate based on role
+        if (result.role === 'admin') {
+          navigate('/admin/dashboard');
+        } else {
+          navigate('/faculty/dashboard');
+        }
+      }
+    } catch (error) {
+      console.error('Login error:', error);
+      message.error('Failed to login. Please try again.');
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -73,19 +76,13 @@ const Login = ({ onLogin }) => {
               />
             </Form.Item>
 
-            <Form.Item name="role">
-              <Radio.Group onChange={(e) => setRole(e.target.value)} value={role}>
-                <Radio value="admin">Admin</Radio>
-                <Radio value="faculty">Faculty</Radio>
-              </Radio.Group>
-            </Form.Item>
-
             <Form.Item>
               <Button 
                 type="primary" 
                 htmlType="submit" 
                 style={{ width: '100%', height: '40px' }}
                 size="large"
+                loading={loading}
               >
                 Log in
               </Button>

@@ -26,105 +26,70 @@ import {
   BookOutlined,
   InfoCircleOutlined,
   ClockCircleOutlined,
-  HomeOutlined
+  HomeOutlined,
+  SearchOutlined
 } from '@ant-design/icons';
 import dayjs from 'dayjs';
+import { useAuth } from '../context/AuthContext';
+import useFetch from '../hooks/useFetch';
+import { 
+  getAllSubjects, 
+  createSubject, 
+  updateSubject, 
+  deleteSubject,
+  getSubjectsByFaculty,
+  getAllFaculty
+} from '../services/api';
+import DataLoader from '../components/DataLoader';
 
 const { Title } = Typography;
 const { Option } = Select;
 const { TextArea } = Input;
 const { RangePicker } = TimePicker;
 
-// Mock user data - in a real app, this would come from authentication context/state
-const currentUser = {
-  id: 'faculty123',
-  name: 'John Smith',
-  role: 'faculty', // 'admin' or 'faculty'
-};
-
 const ManageSubjects = () => {
   const [form] = Form.useForm();
-  const [allSubjects, setAllSubjects] = useState([
-    { 
-      id: 1, 
-      code: 'MATH101', 
-      name: 'Mathematics', 
-      faculty: 'John Smith',
-      facultyId: 'faculty123',
-      enrolledStudents: 35,
-      status: 'active',
-      schedule: {
-        days: ['Monday', 'Wednesday', 'Friday'],
-        timeStart: '09:00',
-        timeEnd: '10:30'
-      },
-      room: 'Room 101'
-    },
-    { 
-      id: 2, 
-      code: 'PHY101', 
-      name: 'Physics', 
-      faculty: 'Emily Johnson',
-      facultyId: 'faculty456',
-      enrolledStudents: 28,
-      status: 'active',
-      schedule: {
-        days: ['Tuesday', 'Thursday'],
-        timeStart: '10:30',
-        timeEnd: '12:00'
-      },
-      room: 'Room 102'
-    },
-    { 
-      id: 3, 
-      code: 'CS101', 
-      name: 'Computer Science', 
-      faculty: 'Michael Brown',
-      facultyId: 'faculty789',
-      enrolledStudents: 42,
-      status: 'active',
-      schedule: {
-        days: ['Monday', 'Wednesday'],
-        timeStart: '13:00',
-        timeEnd: '14:30'
-      },
-      room: 'Computer Lab 1'
-    },
-    { 
-      id: 4, 
-      code: 'ENG101', 
-      name: 'English', 
-      faculty: 'Sarah Davis',
-      facultyId: 'faculty101',
-      enrolledStudents: 30,
-      status: 'inactive',
-      schedule: {
-        days: ['Tuesday', 'Thursday'],
-        timeStart: '14:30',
-        timeEnd: '16:00'
-      },
-      room: 'Room 103'
-    },
-  ]);
-  
-  const [displayedSubjects, setDisplayedSubjects] = useState([]);
+  const [searchForm] = Form.useForm();
   const [isModalVisible, setIsModalVisible] = useState(false);
   const [editingSubject, setEditingSubject] = useState(null);
-  const [loading, setLoading] = useState(false);
+  const [submitLoading, setSubmitLoading] = useState(false);
+  const [searchParams, setSearchParams] = useState({});
+  const { user, role } = useAuth();
 
-  // Filter subjects based on user role
-  useEffect(() => {
-    if (currentUser.role === 'admin') {
-      // Admin can see all subjects
-      setDisplayedSubjects(allSubjects);
-    } else {
-      // Faculty can only see their own subjects
-      const facultySubjects = allSubjects.filter(
-        subject => subject.facultyId === currentUser.id
-      );
-      setDisplayedSubjects(facultySubjects);
+  // Fetch subjects data based on user role
+  const { 
+    data: subjectsData,
+    loading: fetchLoading,
+    error: fetchError,
+    refetch: refetchSubjects
+  } = useFetch(
+    role === 'admin' ? getAllSubjects : getSubjectsByFaculty, 
+    {
+      initialParams: role === 'admin' ? searchParams : user?.id,
+      dependencies: [role, user?.id, searchParams]
     }
-  }, [allSubjects]);
+  );
+
+  // Fetch faculty data for admin users
+  const {
+    data: facultyData,
+    loading: facultyLoading
+  } = useFetch(getAllFaculty, {
+    fetchOnMount: role === 'admin',
+    dependencies: [role]
+  });
+
+  // Extract faculty array from API response
+  const faculty = facultyData?.data || [];
+
+  // Extract subjects array from API response
+  const subjects = subjectsData?.data || [];
+
+  useEffect(() => {
+    if (fetchError) {
+      message.error('Failed to fetch subjects: ' + fetchError);
+    }
+  }, [fetchError]);
 
   const showModal = (subject = null) => {
     setEditingSubject(subject);
@@ -144,10 +109,10 @@ const ManageSubjects = () => {
     } else {
       form.resetFields();
       // For faculty users, pre-fill the faculty field with their own name
-      if (currentUser.role === 'faculty') {
+      if (role === 'faculty') {
         form.setFieldsValue({
-          faculty: currentUser.name,
-          facultyId: currentUser.id
+          faculty: user?.name,
+          facultyId: user?.id
         });
       }
     }
@@ -158,63 +123,78 @@ const ManageSubjects = () => {
     form.resetFields();
   };
 
-  const handleSave = (values) => {
-    setLoading(true);
-    
-    // Prepare schedule data
-    const schedule = {
-      days: values.days,
-      timeStart: values.time[0].format('HH:mm'),
-      timeEnd: values.time[1].format('HH:mm')
-    };
-    
-    // Remove temporary form fields and add schedule object
-    const { days, time, ...restValues } = values;
-    const subjectData = {
-      ...restValues,
-      schedule,
-      room: values.room
-    };
-    
-    // Add facultyId if not provided (for faculty users creating new subjects)
-    if (!subjectData.facultyId && currentUser.role === 'faculty') {
-      subjectData.facultyId = currentUser.id;
-      subjectData.faculty = currentUser.name;
-    }
-    
-    // Simulate API call
-    setTimeout(() => {
+  const handleSearch = (values) => {
+    setSearchParams(values);
+  };
+
+  const resetSearch = () => {
+    searchForm.resetFields();
+    setSearchParams({});
+  };
+
+  const handleSave = async (values) => {
+    try {
+      setSubmitLoading(true);
+      
+      // Prepare schedule data
+      const schedule = {
+        days: values.days,
+        timeStart: values.time[0].format('HH:mm'),
+        timeEnd: values.time[1].format('HH:mm')
+      };
+      
+      // Remove temporary form fields and add schedule object
+      const { days, time, ...restValues } = values;
+      const subjectData = {
+        ...restValues,
+        schedule,
+        room: values.room
+      };
+      
+      // Add facultyId if not provided (for faculty users creating new subjects)
+      if (!subjectData.facultyId && role === 'faculty') {
+        subjectData.facultyId = user?.id;
+        subjectData.faculty = user?.name;
+      }
+      
+      // Ensure facultyId and faculty fields are present
+      if (!subjectData.facultyId || !subjectData.faculty) {
+        throw new Error('Faculty information is required');
+      }
+      
+      console.log('Subject data to be sent:', subjectData);
+      
       if (editingSubject) {
         // Update existing subject
-        const updatedSubjects = allSubjects.map(subject => 
-          subject.id === editingSubject.id ? { ...subject, ...subjectData } : subject
-        );
-        setAllSubjects(updatedSubjects);
+        await updateSubject(editingSubject._id, subjectData);
         message.success('Subject updated successfully!');
       } else {
         // Create new subject
-        const newSubject = {
-          id: Math.max(...allSubjects.map(s => s.id)) + 1,
-          ...subjectData,
-        };
-        setAllSubjects([...allSubjects, newSubject]);
+        await createSubject(subjectData);
         message.success('Subject added successfully!');
       }
+      
       setIsModalVisible(false);
-      setLoading(false);
       form.resetFields();
-    }, 500);
+      refetchSubjects();
+    } catch (error) {
+      console.error('Error saving subject:', error);
+      const errorMsg = error.response?.data?.message || error.message || 'Operation failed';
+      message.error(errorMsg);
+    } finally {
+      setSubmitLoading(false);
+    }
   };
 
-  const handleDelete = (subjectId) => {
-    setLoading(true);
-    
-    // Simulate API call
-    setTimeout(() => {
-      setAllSubjects(allSubjects.filter(subject => subject.id !== subjectId));
+  const handleDelete = async (subjectId) => {
+    try {
+      await deleteSubject(subjectId);
       message.success('Subject deleted successfully!');
-      setLoading(false);
-    }, 500);
+      refetchSubjects();
+    } catch (error) {
+      const errorMsg = error.response?.data?.message || 'Delete failed';
+      message.error(errorMsg);
+    }
   };
 
   const formatSchedule = (schedule) => {
@@ -227,11 +207,13 @@ const ManageSubjects = () => {
       title: 'Code',
       dataIndex: 'code',
       key: 'code',
+      sorter: (a, b) => a.code.localeCompare(b.code),
     },
     {
       title: 'Subject Name',
       dataIndex: 'name',
       key: 'name',
+      sorter: (a, b) => a.name.localeCompare(b.name),
       render: (text) => (
         <Space>
           <BookOutlined style={{ color: '#1677ff' }} />
@@ -243,6 +225,7 @@ const ManageSubjects = () => {
       title: 'Faculty',
       dataIndex: 'faculty',
       key: 'faculty',
+      sorter: (a, b) => a.faculty.localeCompare(b.faculty),
     },
     {
       title: 'Schedule',
@@ -258,6 +241,14 @@ const ManageSubjects = () => {
       title: 'Room',
       dataIndex: 'room',
       key: 'room',
+      filters: [
+        { text: 'Room 101', value: 'Room 101' },
+        { text: 'Room 102', value: 'Room 102' },
+        { text: 'Room 103', value: 'Room 103' },
+        { text: 'Computer Lab 1', value: 'Computer Lab 1' },
+        { text: 'Computer Lab 2', value: 'Computer Lab 2' },
+      ],
+      onFilter: (value, record) => record.room === value,
       render: (room) => (
         <Space>
           <HomeOutlined style={{ color: '#1677ff' }} />
@@ -269,11 +260,17 @@ const ManageSubjects = () => {
       title: 'Enrolled Students',
       dataIndex: 'enrolledStudents',
       key: 'enrolledStudents',
+      sorter: (a, b) => a.enrolledStudents - b.enrolledStudents,
     },
     {
       title: 'Status',
       dataIndex: 'status',
       key: 'status',
+      filters: [
+        { text: 'Active', value: 'active' },
+        { text: 'Inactive', value: 'inactive' },
+      ],
+      onFilter: (value, record) => record.status === value,
       render: (status) => {
         const color = status === 'active' ? 'green' : 'volcano';
         return <Tag color={color}>{status.toUpperCase()}</Tag>;
@@ -291,23 +288,23 @@ const ManageSubjects = () => {
               size="small"
               onClick={() => showModal(record)}
               // Disable edit for faculty users if not their subject
-              disabled={currentUser.role === 'faculty' && record.facultyId !== currentUser.id}
+              disabled={role === 'faculty' && record.facultyId !== user?.id}
             />
           </Tooltip>
           <Tooltip title="Delete Subject">
             <Popconfirm
               title="Are you sure you want to delete this subject?"
-              onConfirm={() => handleDelete(record.id)}
+              onConfirm={() => handleDelete(record._id)}
               okText="Yes"
               cancelText="No"
               // Disable delete for faculty users if not their subject
-              disabled={currentUser.role === 'faculty' && record.facultyId !== currentUser.id}
+              disabled={role === 'faculty' && record.facultyId !== user?.id}
             >
               <Button 
                 danger 
                 icon={<DeleteOutlined />} 
                 size="small"
-                disabled={currentUser.role === 'faculty' && record.facultyId !== currentUser.id}
+                disabled={role === 'faculty' && record.facultyId !== user?.id}
               />
             </Popconfirm>
           </Tooltip>
@@ -339,11 +336,19 @@ const ManageSubjects = () => {
     'Auditorium'
   ];
 
+  // Handle faculty selection change
+  const handleFacultyChange = (value, option) => {
+    form.setFieldsValue({
+      faculty: option.label,
+      facultyId: value
+    });
+  };
+
   return (
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
         <Title level={2}>
-          {currentUser.role === 'admin' ? 'Manage All Subjects' : 'My Subjects'}
+          {role === 'admin' ? 'Manage All Subjects' : 'My Subjects'}
         </Title>
         <Button 
           type="primary" 
@@ -354,19 +359,73 @@ const ManageSubjects = () => {
         </Button>
       </div>
       
+      {/* Search Form (Admin only) */}
+      {role === 'admin' && (
+        <Card style={{ marginBottom: 16 }}>
+          <Form
+            form={searchForm}
+            layout="horizontal"
+            onFinish={handleSearch}
+          >
+            <Row gutter={24}>
+              <Col xs={24} sm={8}>
+                <Form.Item name="code" label="Subject Code">
+                  <Input placeholder="Search by code" />
+                </Form.Item>
+              </Col>
+              <Col xs={24} sm={8}>
+                <Form.Item name="name" label="Subject Name">
+                  <Input placeholder="Search by name" />
+                </Form.Item>
+              </Col>
+              <Col xs={24} sm={8}>
+                <Form.Item name="status" label="Status">
+                  <Select placeholder="Filter by status" allowClear>
+                    <Option value="active">Active</Option>
+                    <Option value="inactive">Inactive</Option>
+                  </Select>
+                </Form.Item>
+              </Col>
+            </Row>
+            <Row>
+              <Col span={24} style={{ textAlign: 'right' }}>
+                <Space>
+                  <Button onClick={resetSearch}>Reset</Button>
+                  <Button type="primary" icon={<SearchOutlined />} htmlType="submit">
+                    Search
+                  </Button>
+                </Space>
+              </Col>
+            </Row>
+          </Form>
+        </Card>
+      )}
+      
       <Card>
-        {currentUser.role === 'faculty' && (
+        {role === 'faculty' && (
           <div style={{ marginBottom: 16 }}>
             <Tag color="blue">Note: As a faculty member, you can only manage your own subjects.</Tag>
           </div>
         )}
         
-        <Table 
-          columns={columns} 
-          dataSource={displayedSubjects} 
-          rowKey="id"
-          loading={loading}
-        />
+        <DataLoader
+          loading={fetchLoading}
+          error={fetchError}
+          data={subjects}
+          emptyMessage="No subjects found"
+        >
+          <Table 
+            columns={columns} 
+            dataSource={subjects} 
+            rowKey="_id"
+            pagination={{
+              defaultPageSize: 10,
+              showSizeChanger: true,
+              pageSizeOptions: ['10', '20', '50'],
+              showTotal: (total, range) => `${range[0]}-${range[1]} of ${total} items`
+            }}
+          />
+        </DataLoader>
       </Card>
 
       <Modal
@@ -380,13 +439,19 @@ const ManageSubjects = () => {
           form={form}
           layout="vertical"
           onFinish={handleSave}
+          validateMessages={{
+            required: '${label} is required!',
+            types: {
+              number: '${label} must be a valid number!'
+            }
+          }}
         >
           <Row gutter={16}>
             <Col span={12}>
               <Form.Item
                 name="code"
                 label="Subject Code"
-                rules={[{ required: true, message: 'Please enter subject code' }]}
+                rules={[{ required: true }]}
               >
                 <Input placeholder="Enter subject code (e.g. MATH101)" />
               </Form.Item>
@@ -395,7 +460,7 @@ const ManageSubjects = () => {
               <Form.Item
                 name="name"
                 label="Subject Name"
-                rules={[{ required: true, message: 'Please enter subject name' }]}
+                rules={[{ required: true }]}
               >
                 <Input placeholder="Enter subject name" />
               </Form.Item>
@@ -404,25 +469,57 @@ const ManageSubjects = () => {
           
           <Row gutter={16}>
             <Col span={12}>
-              <Form.Item
-                name="faculty"
-                label="Faculty"
-                rules={[{ required: true, message: 'Please enter faculty name' }]}
-                // Disable for faculty users
-                disabled={currentUser.role === 'faculty'}
-              >
-                <Input placeholder="Enter faculty name" disabled={currentUser.role === 'faculty'} />
-              </Form.Item>
-              {/* Hidden field to store facultyId */}
-              <Form.Item name="facultyId" hidden={true}>
-                <Input />
-              </Form.Item>
+              {role === 'admin' ? (
+                <Form.Item
+                  label="Faculty"
+                  required
+                  tooltip="Select the faculty member for this subject"
+                >
+                  <Form.Item 
+                    name="facultyId"
+                    noStyle
+                    rules={[{ required: true, message: 'Please select a faculty member' }]}
+                  >
+                    <Select 
+                      placeholder="Select faculty member"
+                      loading={facultyLoading}
+                      onChange={handleFacultyChange}
+                      optionFilterProp="label"
+                      showSearch
+                    >
+                      {faculty.map(f => (
+                        <Option key={f._id} value={f._id} label={f.name}>
+                          {f.name} ({f.department})
+                        </Option>
+                      ))}
+                    </Select>
+                  </Form.Item>
+                  <Form.Item name="faculty" hidden>
+                    <Input />
+                  </Form.Item>
+                </Form.Item>
+              ) : (
+                <>
+                  <Form.Item
+                    name="faculty"
+                    label="Faculty"
+                    rules={[{ required: true }]}
+                    disabled={role === 'faculty'}
+                  >
+                    <Input placeholder="Enter faculty name" disabled={role === 'faculty'} />
+                  </Form.Item>
+                  {/* Hidden field to store facultyId */}
+                  <Form.Item name="facultyId" hidden={true}>
+                    <Input />
+                  </Form.Item>
+                </>
+              )}
             </Col>
             <Col span={12}>
               <Form.Item
                 name="enrolledStudents"
                 label="Enrolled Students"
-                rules={[{ required: true, message: 'Please enter number of enrolled students' }]}
+                rules={[{ required: true, type: 'number', min: 0 }]}
               >
                 <InputNumber min={0} style={{ width: '100%' }} placeholder="Enter number of enrolled students" />
               </Form.Item>
@@ -435,7 +532,7 @@ const ManageSubjects = () => {
               <Form.Item
                 name="days"
                 label="Days"
-                rules={[{ required: true, message: 'Please select days' }]}
+                rules={[{ required: true, type: 'array', min: 1, message: 'Please select at least one day' }]}
               >
                 <Select 
                   mode="multiple" 
@@ -448,7 +545,7 @@ const ManageSubjects = () => {
               <Form.Item
                 name="time"
                 label="Time"
-                rules={[{ required: true, message: 'Please select time range' }]}
+                rules={[{ required: true }]}
               >
                 <RangePicker 
                   format="HH:mm"
@@ -464,7 +561,7 @@ const ManageSubjects = () => {
               <Form.Item
                 name="room"
                 label="Room"
-                rules={[{ required: true, message: 'Please select room' }]}
+                rules={[{ required: true }]}
               >
                 <Select placeholder="Select room">
                   {roomOptions.map(room => (
@@ -477,7 +574,7 @@ const ManageSubjects = () => {
               <Form.Item
                 name="status"
                 label="Status"
-                rules={[{ required: true, message: 'Please select status' }]}
+                rules={[{ required: true }]}
                 initialValue="active"
               >
                 <Select placeholder="Select status">
@@ -493,7 +590,11 @@ const ManageSubjects = () => {
           <Form.Item style={{ marginBottom: 0, textAlign: 'right' }}>
             <Space>
               <Button onClick={handleCancel}>Cancel</Button>
-              <Button type="primary" htmlType="submit" loading={loading}>
+              <Button 
+                type="primary" 
+                htmlType="submit" 
+                loading={submitLoading}
+              >
                 {editingSubject ? 'Update' : 'Create'}
               </Button>
             </Space>

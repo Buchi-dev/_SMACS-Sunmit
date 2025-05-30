@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   Typography, 
   Card, 
@@ -29,8 +29,22 @@ import {
   LineChartOutlined,
   UserOutlined,
   BookOutlined,
-  TeamOutlined
+  TeamOutlined,
+  CalendarOutlined
 } from '@ant-design/icons';
+import dayjs from 'dayjs';
+import { useAuth } from '../context/AuthContext';
+import { 
+  getAllSubjects, 
+  getSubjectsByFaculty,
+  getClassReport, 
+  getSubjectReport, 
+  getStudentReport,
+  getAllStudents,
+  getStudentsByClass
+} from '../services/api';
+import useFetch from '../hooks/useFetch';
+import DataLoader from '../components/DataLoader';
 
 const { Title } = Typography;
 const { Option } = Select;
@@ -43,123 +57,182 @@ const ManageReports = () => {
   const [reportData, setReportData] = useState([]);
   const [loading, setLoading] = useState(false);
   const [activeTab, setActiveTab] = useState('1');
+  const [selectedDateRange, setSelectedDateRange] = useState([dayjs().subtract(30, 'days'), dayjs()]);
+  const [selectedClass, setSelectedClass] = useState(null);
+  const [selectedSubject, setSelectedSubject] = useState(null);
+  const { user, role } = useAuth();
 
-  // Mock classes and subjects
-  const classes = [
-    { id: 1, name: 'Class A' },
-    { id: 2, name: 'Class B' },
-    { id: 3, name: 'Class C' },
-  ];
+  // Fetch subjects based on user role
+  const { 
+    data: subjectsData,
+    loading: subjectsLoading,
+    error: subjectsError
+  } = useFetch(
+    role === 'admin' ? getAllSubjects : getSubjectsByFaculty, 
+    {
+      initialParams: role === 'admin' ? {} : user?.id,
+      dependencies: [role, user?.id]
+    }
+  );
 
-  const subjects = [
-    { id: 1, name: 'Mathematics' },
-    { id: 2, name: 'Physics' },
-    { id: 3, name: 'Computer Science' },
-  ];
+  // Extract subjects array
+  const subjects = subjectsData?.data || [];
 
-  // Mock data generators for different report types
-  const generateClassAttendanceReport = (classId, dateRange) => {
-    const subjects = ['Mathematics', 'Physics', 'Computer Science', 'English', 'History'];
-    return subjects.map((subject, index) => {
-      // Generate random percentage between 70 and 100
-      const percentage = Math.floor(Math.random() * 30) + 70;
-      return {
-        id: index + 1,
-        subject,
-        percentage,
-        totalStudents: 30,
-        present: Math.floor(30 * (percentage / 100)),
-        absent: Math.floor(30 * (1 - percentage / 100)),
-        class: classes.find(c => c.id === classId)?.name || '',
+  // Classes are derived from subjects
+  const classes = Array.from(new Set(subjects.map(subject => subject.class))).filter(Boolean).map((className, index) => ({
+    id: index + 1,
+    name: className
+  }));
+
+  // Fetch students based on selected class
+  const {
+    data: studentsData,
+    loading: studentsLoading,
+    refetch: fetchStudents
+  } = useFetch(
+    selectedClass ? getStudentsByClass : getAllStudents,
+    {
+      initialParams: selectedClass || {},
+      fetchOnMount: false
+    }
+  );
+
+  // Extract students array
+  const students = studentsData?.data || [];
+
+  useEffect(() => {
+    if (selectedClass) {
+      fetchStudents(selectedClass);
+    }
+  }, [selectedClass]);
+
+  const fetchReportData = async (values) => {
+    try {
+      setLoading(true);
+      setReportType(values.reportType);
+      
+      const dateRange = values.dateRange || selectedDateRange;
+      const params = {
+        startDate: dateRange[0].format('YYYY-MM-DD'),
+        endDate: dateRange[1].format('YYYY-MM-DD')
       };
-    });
+      
+      let response;
+      
+      switch (values.reportType) {
+        case 'class':
+          response = await getClassReport(values.class, params);
+          break;
+        case 'subject':
+          response = await getSubjectReport(values.subject, params);
+          break;
+        case 'student':
+          if (values.student) {
+            response = await getStudentReport(values.student, {
+              ...params,
+              subjectId: values.subject
+            });
+          }
+          break;
+        default:
+          throw new Error('Invalid report type');
+      }
+      
+      if (response.data.success) {
+        setReportData(processReportData(values.reportType, response.data.data));
+      } else {
+        message.error('Failed to fetch report data');
+        setReportData([]);
+      }
+    } catch (error) {
+      console.error('Error fetching report data:', error);
+      message.error('Failed to fetch report data');
+      setReportData([]);
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const generateSubjectAttendanceReport = (subjectId, dateRange) => {
-    const classNames = ['Class A', 'Class B', 'Class C'];
-    return classNames.map((className, index) => {
-      // Generate random percentage between 70 and 100
-      const percentage = Math.floor(Math.random() * 30) + 70;
-      return {
-        id: index + 1,
-        class: className,
-        percentage,
-        totalStudents: 30,
-        present: Math.floor(30 * (percentage / 100)),
-        absent: Math.floor(30 * (1 - percentage / 100)),
-        subject: subjects.find(s => s.id === subjectId)?.name || '',
-      };
-    });
+  const processReportData = (type, data) => {
+    switch (type) {
+      case 'class':
+        return processClassReport(data);
+      case 'subject':
+        return processSubjectReport(data);
+      case 'student':
+        return processStudentReport(data);
+      default:
+        return [];
+    }
   };
 
-  const generateStudentAttendanceReport = (classId, subjectId, dateRange) => {
-    const students = [
-      'John Doe',
-      'Jane Smith',
-      'Michael Johnson',
-      'Emily Davis',
-      'Robert Brown',
-      'Sophia Wilson',
-      'William Taylor',
-      'Olivia Martinez',
-      'James Anderson',
-      'Emma Thomas'
-    ];
+  const processClassReport = (data) => {
+    return data.map((item, index) => ({
+      id: index + 1,
+      subject: item.subjectName,
+      subjectId: item.subjectId,
+      percentage: item.attendancePercentage || 0,
+      totalStudents: item.totalStudents || 0,
+      present: item.presentCount || 0,
+      absent: item.absentCount || 0,
+      class: item.className || '',
+    }));
+  };
 
-    return students.map((name, index) => {
-      // Generate random percentage between 60 and 100
-      const percentage = Math.floor(Math.random() * 40) + 60;
-      const totalClasses = 50;
-      return {
-        id: index + 1,
-        rollNumber: `STD00${index + 1}`,
-        name,
-        percentage,
-        totalClasses,
-        present: Math.floor(totalClasses * (percentage / 100)),
-        absent: totalClasses - Math.floor(totalClasses * (percentage / 100)),
-        class: classes.find(c => c.id === classId)?.name || '',
-        subject: subjects.find(s => s.id === subjectId)?.name || '',
-      };
-    });
+  const processSubjectReport = (data) => {
+    return data.map((item, index) => ({
+      id: index + 1,
+      class: item.className,
+      classId: item.classId,
+      percentage: item.attendancePercentage || 0,
+      totalStudents: item.totalStudents || 0,
+      present: item.presentCount || 0,
+      absent: item.absentCount || 0,
+      subject: item.subjectName || '',
+    }));
+  };
+
+  const processStudentReport = (data) => {
+    return data.map((item, index) => ({
+      id: index + 1,
+      rollNumber: item.studentRollNumber,
+      name: item.studentName,
+      studentId: item.studentId,
+      percentage: item.attendancePercentage || 0,
+      totalClasses: item.totalClasses || 0,
+      present: item.presentCount || 0,
+      absent: item.absentCount || 0,
+      class: item.className || '',
+      subject: item.subjectName || '',
+    }));
   };
 
   const handleSearch = (values) => {
-    setLoading(true);
-    setReportType(values.reportType);
+    setSelectedClass(values.class);
+    setSelectedSubject(values.subject);
+    if (values.dateRange) {
+      setSelectedDateRange(values.dateRange);
+    }
     
-    // Simulate API call
-    setTimeout(() => {
-      let data = [];
-      switch (values.reportType) {
-        case 'class':
-          data = generateClassAttendanceReport(values.class, values.dateRange);
-          break;
-        case 'subject':
-          data = generateSubjectAttendanceReport(values.subject, values.dateRange);
-          break;
-        case 'student':
-          data = generateStudentAttendanceReport(values.class, values.subject, values.dateRange);
-          break;
-        default:
-          data = [];
-      }
-      setReportData(data);
-      setLoading(false);
-    }, 1000);
+    fetchReportData(values);
   };
 
   const resetForm = () => {
     form.resetFields();
     setReportData([]);
     setReportType(null);
+    setSelectedClass(null);
+    setSelectedSubject(null);
+    setSelectedDateRange([dayjs().subtract(30, 'days'), dayjs()]);
   };
 
   const exportToExcel = () => {
+    // In a real app, this would generate and download an Excel file
     message.success('Report exported to Excel successfully!');
   };
 
   const exportToPdf = () => {
+    // In a real app, this would generate and download a PDF file
     message.success('Report exported to PDF successfully!');
   };
 
@@ -195,9 +268,10 @@ const ManageReports = () => {
       title: 'Attendance %',
       dataIndex: 'percentage',
       key: 'percentage',
+      sorter: (a, b) => a.percentage - b.percentage,
       render: (percentage) => (
         <Progress 
-          percent={percentage} 
+          percent={parseFloat(percentage).toFixed(1)} 
           size="small"
           status={percentage < 75 ? 'exception' : 'normal'}
         />
@@ -206,6 +280,17 @@ const ManageReports = () => {
     {
       title: 'Status',
       key: 'status',
+      filters: [
+        { text: 'Good', value: 'good' },
+        { text: 'Average', value: 'average' },
+        { text: 'Poor', value: 'poor' },
+      ],
+      onFilter: (value, record) => {
+        if (value === 'good') return record.percentage >= 85;
+        if (value === 'average') return record.percentage >= 75 && record.percentage < 85;
+        if (value === 'poor') return record.percentage < 75;
+        return true;
+      },
       render: (_, record) => {
         let color = 'green';
         let text = 'Good';
@@ -255,9 +340,10 @@ const ManageReports = () => {
       title: 'Attendance %',
       dataIndex: 'percentage',
       key: 'percentage',
+      sorter: (a, b) => a.percentage - b.percentage,
       render: (percentage) => (
         <Progress 
-          percent={percentage} 
+          percent={parseFloat(percentage).toFixed(1)} 
           size="small"
           status={percentage < 75 ? 'exception' : 'normal'}
         />
@@ -266,6 +352,17 @@ const ManageReports = () => {
     {
       title: 'Status',
       key: 'status',
+      filters: [
+        { text: 'Good', value: 'good' },
+        { text: 'Average', value: 'average' },
+        { text: 'Poor', value: 'poor' },
+      ],
+      onFilter: (value, record) => {
+        if (value === 'good') return record.percentage >= 85;
+        if (value === 'average') return record.percentage >= 75 && record.percentage < 85;
+        if (value === 'poor') return record.percentage < 75;
+        return true;
+      },
       render: (_, record) => {
         let color = 'green';
         let text = 'Good';
@@ -296,7 +393,7 @@ const ManageReports = () => {
       key: 'name',
       render: (text) => (
         <Space>
-          <Avatar size="small" icon={<UserOutlined />} />
+          <Avatar icon={<UserOutlined />} />
           {text}
         </Space>
       ),
@@ -320,9 +417,10 @@ const ManageReports = () => {
       title: 'Attendance %',
       dataIndex: 'percentage',
       key: 'percentage',
+      sorter: (a, b) => a.percentage - b.percentage,
       render: (percentage) => (
         <Progress 
-          percent={percentage} 
+          percent={parseFloat(percentage).toFixed(1)} 
           size="small"
           status={percentage < 75 ? 'exception' : 'normal'}
         />
@@ -331,6 +429,17 @@ const ManageReports = () => {
     {
       title: 'Status',
       key: 'status',
+      filters: [
+        { text: 'Good', value: 'good' },
+        { text: 'Average', value: 'average' },
+        { text: 'Poor', value: 'poor' },
+      ],
+      onFilter: (value, record) => {
+        if (value === 'good') return record.percentage >= 85;
+        if (value === 'average') return record.percentage >= 75 && record.percentage < 85;
+        if (value === 'poor') return record.percentage < 75;
+        return true;
+      },
       render: (_, record) => {
         let color = 'green';
         let text = 'Good';
@@ -348,11 +457,13 @@ const ManageReports = () => {
     },
   ];
 
-  // Function to render appropriate table based on report type
   const renderReportTable = () => {
     if (!reportType || reportData.length === 0) {
       return (
-        <Empty description="No report data available. Please generate a report." />
+        <Empty 
+          description="No report data available. Please select report parameters and search." 
+          image={Empty.PRESENTED_IMAGE_SIMPLE}
+        />
       );
     }
 
@@ -372,201 +483,264 @@ const ManageReports = () => {
     }
 
     return (
-      <Table 
-        columns={columns}
-        dataSource={reportData}
-        rowKey="id"
-        pagination={false}
+      <DataLoader
         loading={loading}
-      />
+        error={null}
+        data={reportData}
+        emptyMessage="No report data available"
+      >
+        <Table 
+          columns={columns} 
+          dataSource={reportData} 
+          rowKey="id"
+          pagination={{ pageSize: 10 }}
+        />
+      </DataLoader>
     );
   };
 
-  // Function to render stats cards based on report type
   const renderStats = () => {
     if (!reportType || reportData.length === 0) {
       return null;
     }
 
-    // Calculate average attendance percentage
-    const avgPercentage = reportData.reduce((acc, curr) => acc + curr.percentage, 0) / reportData.length;
+    const totalAttendance = reportData.reduce((sum, item) => sum + item.percentage, 0) / reportData.length;
     
-    // Count entities below 75%
-    const belowThreshold = reportData.filter(item => item.percentage < 75).length;
+    let totalPresent = 0;
+    let totalAbsent = 0;
+    let totalStudents = 0;
+    
+    reportData.forEach(item => {
+      totalPresent += item.present;
+      totalAbsent += item.absent;
+      if (reportType !== 'student') {
+        totalStudents += item.totalStudents;
+      }
+    });
+    
+    if (reportType === 'student') {
+      totalStudents = reportData.length;
+    }
 
     return (
-      <Row gutter={16} style={{ marginBottom: 16 }}>
-        <Col xs={24} md={8}>
-          <Card>
-            <Statistic 
-              title={`Total ${reportType === 'class' ? 'Subjects' : reportType === 'subject' ? 'Classes' : 'Students'}`} 
-              value={reportData.length} 
-              prefix={reportType === 'class' ? <BookOutlined /> : reportType === 'subject' ? <TeamOutlined /> : <UserOutlined />}
-            />
-          </Card>
-        </Col>
-        <Col xs={24} md={8}>
-          <Card>
+      <Card style={{ marginTop: 16 }}>
+        <Row gutter={16}>
+          <Col span={6}>
             <Statistic 
               title="Average Attendance" 
-              value={avgPercentage.toFixed(2)}
-              suffix="%"
-              valueStyle={{ color: avgPercentage >= 85 ? '#3f8600' : avgPercentage >= 75 ? '#faad14' : '#cf1322' }}
-              prefix={<BarChartOutlined />}
+              value={parseFloat(totalAttendance).toFixed(1)} 
+              suffix="%" 
+              valueStyle={{ color: totalAttendance >= 85 ? '#3f8600' : totalAttendance >= 75 ? '#faad14' : '#cf1322' }}
             />
-          </Card>
-        </Col>
-        <Col xs={24} md={8}>
-          <Card>
+          </Col>
+          <Col span={6}>
             <Statistic 
-              title="Below 75% Threshold" 
-              value={belowThreshold}
-              suffix={`/ ${reportData.length}`}
-              valueStyle={{ color: belowThreshold > 0 ? '#cf1322' : '#3f8600' }}
-              prefix={<LineChartOutlined />}
+              title="Total Students" 
+              value={totalStudents} 
+              prefix={<TeamOutlined />}
             />
-          </Card>
-        </Col>
-      </Row>
+          </Col>
+          <Col span={6}>
+            <Statistic 
+              title="Present Count" 
+              value={totalPresent} 
+              valueStyle={{ color: '#3f8600' }}
+            />
+          </Col>
+          <Col span={6}>
+            <Statistic 
+              title="Absent Count" 
+              value={totalAbsent} 
+              valueStyle={{ color: '#cf1322' }}
+            />
+          </Col>
+        </Row>
+      </Card>
     );
   };
 
   return (
     <div>
-      <Title level={2}>Manage Reports</Title>
+      <Title level={2}>Attendance Reports</Title>
       
-      {/* Report Generator Form */}
-      <Card style={{ marginBottom: 16 }}>
-        <Form
-          form={form}
-          layout="horizontal"
-          onFinish={handleSearch}
+      <Tabs activeKey={activeTab} onChange={setActiveTab}>
+        <TabPane 
+          tab={
+            <span>
+              <SearchOutlined />
+              Generate Reports
+            </span>
+          } 
+          key="1"
         >
-          <Row gutter={24}>
-            <Col xs={24} sm={8}>
-              <Form.Item
-                name="reportType"
-                label="Report Type"
-                rules={[{ required: true, message: 'Please select report type' }]}
-              >
-                <Select 
-                  placeholder="Select report type"
-                  onChange={(value) => setReportType(value)}
-                >
-                  <Option value="class">Class Attendance Report</Option>
-                  <Option value="subject">Subject Attendance Report</Option>
-                  <Option value="student">Student Attendance Report</Option>
-                </Select>
+          <Card>
+            <Form 
+              form={form} 
+              layout="vertical" 
+              onFinish={handleSearch}
+              initialValues={{
+                reportType: 'class',
+                dateRange: selectedDateRange
+              }}
+            >
+              <Row gutter={24}>
+                <Col span={6}>
+                  <Form.Item
+                    label="Report Type"
+                    name="reportType"
+                    rules={[{ required: true, message: 'Please select report type' }]}
+                  >
+                    <Select 
+                      placeholder="Select report type"
+                      onChange={(value) => {
+                        setReportType(value);
+                        form.setFieldsValue({
+                          class: null,
+                          subject: null,
+                          student: null
+                        });
+                      }}
+                    >
+                      <Option value="class">Class Report</Option>
+                      <Option value="subject">Subject Report</Option>
+                      <Option value="student">Student Report</Option>
+                    </Select>
+                  </Form.Item>
+                </Col>
+                
+                <Col span={6}>
+                  <Form.Item
+                    label="Date Range"
+                    name="dateRange"
+                    rules={[{ required: true, message: 'Please select date range' }]}
+                  >
+                    <RangePicker style={{ width: '100%' }} />
+                  </Form.Item>
+                </Col>
+                
+                {(reportType === 'class' || reportType === 'student') && (
+                  <Col span={6}>
+                    <Form.Item
+                      label="Class"
+                      name="class"
+                      rules={[{ required: true, message: 'Please select class' }]}
+                    >
+                      <Select 
+                        placeholder="Select class"
+                        loading={subjectsLoading}
+                        onChange={(value) => setSelectedClass(value)}
+                      >
+                        {classes.map(cls => (
+                          <Option key={cls.id} value={cls.name}>{cls.name}</Option>
+                        ))}
+                      </Select>
+                    </Form.Item>
+                  </Col>
+                )}
+                
+                {(reportType === 'subject' || reportType === 'student') && (
+                  <Col span={6}>
+                    <Form.Item
+                      label="Subject"
+                      name="subject"
+                      rules={[{ required: true, message: 'Please select subject' }]}
+                    >
+                      <Select 
+                        placeholder="Select subject"
+                        loading={subjectsLoading}
+                        onChange={(value) => setSelectedSubject(value)}
+                      >
+                        {subjects.map(subject => (
+                          <Option key={subject._id} value={subject._id}>{subject.name}</Option>
+                        ))}
+                      </Select>
+                    </Form.Item>
+                  </Col>
+                )}
+                
+                {reportType === 'student' && selectedClass && (
+                  <Col span={6}>
+                    <Form.Item
+                      label="Student"
+                      name="student"
+                      rules={[{ required: true, message: 'Please select student' }]}
+                    >
+                      <Select 
+                        placeholder="Select student"
+                        loading={studentsLoading}
+                      >
+                        {students.map(student => (
+                          <Option key={student._id} value={student._id}>
+                            {student.name} ({student.rollNumber})
+                          </Option>
+                        ))}
+                      </Select>
+                    </Form.Item>
+                  </Col>
+                )}
+              </Row>
+              
+              <Form.Item>
+                <Space>
+                  <Button 
+                    type="primary" 
+                    htmlType="submit" 
+                    icon={<SearchOutlined />}
+                    loading={loading}
+                  >
+                    Generate Report
+                  </Button>
+                  <Button onClick={resetForm}>Reset</Button>
+                  
+                  {reportData.length > 0 && (
+                    <>
+                      <Button 
+                        type="primary" 
+                        icon={<FileExcelOutlined />} 
+                        onClick={exportToExcel}
+                        style={{ background: '#52c41a', borderColor: '#52c41a' }}
+                      >
+                        Export to Excel
+                      </Button>
+                      <Button 
+                        type="primary" 
+                        icon={<FilePdfOutlined />} 
+                        onClick={exportToPdf}
+                        danger
+                      >
+                        Export to PDF
+                      </Button>
+                    </>
+                  )}
+                </Space>
               </Form.Item>
-            </Col>
-            
-            {(reportType === 'class' || reportType === 'student') && (
-              <Col xs={24} sm={8}>
-                <Form.Item
-                  name="class"
-                  label="Class"
-                  rules={[{ required: true, message: 'Please select class' }]}
-                >
-                  <Select placeholder="Select class">
-                    {classes.map(cls => (
-                      <Option key={cls.id} value={cls.id}>{cls.name}</Option>
-                    ))}
-                  </Select>
-                </Form.Item>
-              </Col>
-            )}
-            
-            {(reportType === 'subject' || reportType === 'student') && (
-              <Col xs={24} sm={8}>
-                <Form.Item
-                  name="subject"
-                  label="Subject"
-                  rules={[{ required: true, message: 'Please select subject' }]}
-                >
-                  <Select placeholder="Select subject">
-                    {subjects.map(subject => (
-                      <Option key={subject.id} value={subject.id}>{subject.name}</Option>
-                    ))}
-                  </Select>
-                </Form.Item>
-              </Col>
-            )}
-            
-            <Col xs={24} sm={reportType === 'student' ? 24 : 8}>
-              <Form.Item
-                name="dateRange"
-                label="Date Range"
-                rules={[{ required: true, message: 'Please select date range' }]}
-              >
-                <RangePicker style={{ width: '100%' }} />
-              </Form.Item>
-            </Col>
-          </Row>
+            </Form>
+          </Card>
           
-          <Row>
-            <Col span={24} style={{ textAlign: 'right' }}>
-              <Space>
-                <Button onClick={resetForm}>Reset</Button>
-                <Button 
-                  type="primary" 
-                  icon={<SearchOutlined />} 
-                  htmlType="submit"
-                  loading={loading}
-                >
-                  Generate Report
-                </Button>
-              </Space>
-            </Col>
-          </Row>
-        </Form>
-      </Card>
-      
-      {/* Report Results */}
-      {reportData.length > 0 && (
-        <Card>
-          {/* Report Title */}
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-            <Title level={4}>
-              {reportType === 'class' 
-                ? `Attendance Report for ${reportData[0]?.class}`
-                : reportType === 'subject'
-                  ? `Attendance Report for ${reportData[0]?.subject}`
-                  : `Student Attendance Report for ${reportData[0]?.class} - ${reportData[0]?.subject}`
-              }
-            </Title>
-            <Space>
-              <Button 
-                icon={<FileExcelOutlined />} 
-                onClick={exportToExcel}
-              >
-                Export Excel
-              </Button>
-              <Button 
-                icon={<FilePdfOutlined />} 
-                onClick={exportToPdf}
-              >
-                Export PDF
-              </Button>
-            </Space>
-          </div>
-          
-          {/* Stats Cards */}
           {renderStats()}
           
-          {/* Report Tabs */}
-          <Tabs activeKey={activeTab} onChange={setActiveTab}>
-            <TabPane tab="Table View" key="1">
-              {renderReportTable()}
-            </TabPane>
-            <TabPane tab="Chart View" key="2">
-              <div style={{ padding: '40px 0', textAlign: 'center' }}>
-                <PieChartOutlined style={{ fontSize: 64, color: '#1677ff' }} />
-                <p style={{ marginTop: 16 }}>Charts would be displayed here. Implement with Chart.js or Recharts library.</p>
-              </div>
-            </TabPane>
-          </Tabs>
-        </Card>
-      )}
+          <Card style={{ marginTop: 16 }}>
+            {renderReportTable()}
+          </Card>
+        </TabPane>
+        
+        <TabPane 
+          tab={
+            <span>
+              <BarChartOutlined />
+              Visual Reports
+            </span>
+          } 
+          key="2"
+        >
+          <Card>
+            <Empty 
+              description="Visual reports will be available in future updates." 
+              image={Empty.PRESENTED_IMAGE_SIMPLE}
+            />
+          </Card>
+        </TabPane>
+      </Tabs>
     </div>
   );
 };

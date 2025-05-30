@@ -1,5 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { useAuth } from './context/AuthContext';
 import AdminLayout from './components/AdminLayout';
 import FacultyLayout from './components/FacultyLayout';
 import Login from './pages/Login';
@@ -13,65 +14,43 @@ import ManageReports from './pages/ManageReports';
 import ManageUsers from './pages/ManageUsers';
 import AttendancePanel from './pages/AttendancePanel';
 import AttendanceConsole from './pages/AttendanceConsole';
-/**
- * Access Map:
- * 
- * Faculty: Can access their own subjects, students, attendance records, and 
- * attendance reports of their subjects. Faculty can access Manage Subjects, 
- * Manage Students, Manage Attendance, and Manage Reports pages.
- * 
- * Admin: Can access all subjects, students, faculties, and everything else
- */
+import { Spin } from 'antd';
 
 const App = () => {
-  // Use localStorage to maintain authentication state across page refreshes
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
-  const [userRole, setUserRole] = useState('');
+  const { isAuthenticated, role, loading, logout } = useAuth();
 
-  // Check localStorage for auth state on component mount
-  useEffect(() => {
-    const authStatus = localStorage.getItem('isAuthenticated');
-    const role = localStorage.getItem('userRole');
-    
-    if (authStatus === 'true' && role) {
-      setIsAuthenticated(true);
-      setUserRole(role);
-    }
-  }, []);
-
-  // Function to handle login
-  const handleLogin = (role) => {
-    localStorage.setItem('isAuthenticated', 'true');
-    localStorage.setItem('userRole', role);
-    setIsAuthenticated(true);
-    setUserRole(role);
-  };
-
-  // Function to handle logout
-  const handleLogout = () => {
-    localStorage.removeItem('isAuthenticated');
-    localStorage.removeItem('userRole');
-    setIsAuthenticated(false);
-    setUserRole('');
-  };
+  if (loading) {
+    return (
+      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}>
+        <Spin size="large" />
+      </div>
+    );
+  }
 
   return (
     <BrowserRouter>
       <Routes>
         {/* Public routes */}
-        <Route path="/login" element={
-          isAuthenticated ? <Navigate to="/dashboard" replace /> : <Login onLogin={handleLogin} />
-        } />
-        <Route path="/register" element={
-          isAuthenticated ? <Navigate to="/dashboard" replace /> : <Register />
-        } />
+        <Route
+          path="/login"
+          element={isAuthenticated ? <Navigate to="/dashboard" replace /> : <Login />}
+        />
+        <Route
+          path="/register"
+          element={isAuthenticated ? <Navigate to="/dashboard" replace /> : <Register />}
+        />
 
-        {/* Admin routes - Full access to everything */}
-        <Route path="/admin/*" element={
-          isAuthenticated && userRole === 'admin' ? 
-            <AdminLayout onLogout={handleLogout} /> : 
-            <Navigate to="/login" replace />
-        }>
+        {/* Admin routes */}
+        <Route
+          path="/admin/*"
+          element={
+            isAuthenticated && role === 'admin' ? (
+              <AdminLayout onLogout={logout} />
+            ) : (
+              <Navigate to="/login" replace />
+            )
+          }
+        >
           <Route index element={<Dashboard />} />
           <Route path="dashboard" element={<Dashboard />} />
           <Route path="manage-students" element={<ManageStudents />} />
@@ -83,12 +62,17 @@ const App = () => {
           <Route path="attendance-console" element={<AttendanceConsole />} />
         </Route>
 
-        {/* Faculty routes - Access to subjects, students, attendance, and reports */}
-        <Route path="/faculty/*" element={
-          isAuthenticated && userRole === 'faculty' ? 
-            <FacultyLayout onLogout={handleLogout} /> : 
-            <Navigate to="/login" replace />
-        }>
+        {/* Faculty routes */}
+        <Route
+          path="/faculty/*"
+          element={
+            isAuthenticated && role === 'faculty' ? (
+              <FacultyLayout onLogout={logout} />
+            ) : (
+              <Navigate to="/login" replace />
+            )
+          }
+        >
           <Route index element={<Dashboard />} />
           <Route path="dashboard" element={<Dashboard />} />
           <Route path="manage-students" element={<ManageStudents />} />
@@ -99,28 +83,34 @@ const App = () => {
           <Route path="attendance-console" element={<AttendanceConsole />} />
         </Route>
 
-        {/* Root path redirect based on role */}
-        <Route path="/" element={
-          !isAuthenticated ? (
-            <Navigate to="/login" replace />
-          ) : userRole === 'admin' ? (
-            <Navigate to="/admin/dashboard" replace />
-          ) : (
-            <Navigate to="/faculty/dashboard" replace />
-          )
-        } />
-        
-        <Route path="/dashboard" element={
-          !isAuthenticated ? (
-            <Navigate to="/login" replace />
-          ) : userRole === 'admin' ? (
-            <Navigate to="/admin/dashboard" replace />
-          ) : (
-            <Navigate to="/faculty/dashboard" replace />
-          )
-        } />
+        {/* Redirect root to proper dashboard */}
+        <Route
+          path="/"
+          element={
+            !isAuthenticated ? (
+              <Navigate to="/login" replace />
+            ) : role === 'admin' ? (
+              <Navigate to="/admin/dashboard" replace />
+            ) : (
+              <Navigate to="/faculty/dashboard" replace />
+            )
+          }
+        />
 
-        {/* Fallback route */}
+        <Route
+          path="/dashboard"
+          element={
+            !isAuthenticated ? (
+              <Navigate to="/login" replace />
+            ) : role === 'admin' ? (
+              <Navigate to="/admin/dashboard" replace />
+            ) : (
+              <Navigate to="/faculty/dashboard" replace />
+            )
+          }
+        />
+
+        {/* Catch all */}
         <Route path="*" element={<Navigate to="/login" replace />} />
       </Routes>
     </BrowserRouter>

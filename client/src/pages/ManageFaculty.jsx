@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   Typography, 
   Button, 
@@ -28,6 +28,16 @@ import {
   PhoneOutlined,
   BookOutlined
 } from '@ant-design/icons';
+import useFetch from '../hooks/useFetch';
+import { 
+  getAllFaculty, 
+  createFaculty, 
+  updateFaculty, 
+  deleteFaculty,
+  registerFaculty
+} from '../services/api';
+import DataLoader from '../components/DataLoader';
+import axios from 'axios';
 
 const { Title } = Typography;
 const { Option } = Select;
@@ -36,48 +46,34 @@ const { TextArea } = Input;
 const ManageFaculty = () => {
   const [form] = Form.useForm();
   const [searchForm] = Form.useForm();
-  const [faculty, setFaculty] = useState([
-    { 
-      id: 1, 
-      employeeId: 'FAC001', 
-      name: 'John Smith', 
-      email: 'john.smith@example.com',
-      phone: '1234567890',
-      department: 'Mathematics',
-      qualification: 'Ph.D.',
-      joiningDate: '2018-03-15',
-      subjects: ['Mathematics', 'Statistics'],
-      status: 'active'
-    },
-    { 
-      id: 2, 
-      employeeId: 'FAC002', 
-      name: 'Emily Johnson', 
-      email: 'emily.johnson@example.com',
-      phone: '9876543210',
-      department: 'Physics',
-      qualification: 'Ph.D.',
-      joiningDate: '2019-07-22',
-      subjects: ['Physics', 'Electronics'],
-      status: 'active'
-    },
-    { 
-      id: 3, 
-      employeeId: 'FAC003', 
-      name: 'Michael Brown', 
-      email: 'michael.brown@example.com',
-      phone: '5556667777',
-      department: 'Computer Science',
-      qualification: 'M.Tech.',
-      joiningDate: '2020-01-10',
-      subjects: ['Computer Science', 'Programming'],
-      status: 'inactive'
-    },
-  ]);
-  const [filteredFaculty, setFilteredFaculty] = useState([...faculty]);
   const [isModalVisible, setIsModalVisible] = useState(false);
   const [editingFaculty, setEditingFaculty] = useState(null);
-  const [loading, setLoading] = useState(false);
+  const [searchParams, setSearchParams] = useState({});
+  const [submitLoading, setSubmitLoading] = useState(false);
+  const [createAccountModalVisible, setCreateAccountModalVisible] = useState(false);
+  const [selectedFaculty, setSelectedFaculty] = useState(null);
+  const [userForm] = Form.useForm();
+  const [userFormLoading, setUserFormLoading] = useState(false);
+
+  // Fetch faculty data
+  const { 
+    data: facultyData,
+    loading: fetchLoading,
+    error: fetchError,
+    refetch: refetchFaculty
+  } = useFetch(getAllFaculty, {
+    initialParams: searchParams,
+    dependencies: [searchParams]
+  });
+
+  // Extract faculty array from API response
+  const faculty = facultyData?.data || [];
+
+  useEffect(() => {
+    if (fetchError) {
+      message.error('Failed to fetch faculty: ' + fetchError);
+    }
+  }, [fetchError]);
 
   const showModal = (faculty = null) => {
     setEditingFaculty(faculty);
@@ -105,76 +101,112 @@ const ManageFaculty = () => {
   };
 
   const handleSearch = (values) => {
-    const filtered = faculty.filter(f => {
-      const matchName = !values.name || f.name.toLowerCase().includes(values.name.toLowerCase());
-      const matchDepartment = !values.department || f.department === values.department;
-      const matchStatus = !values.status || f.status === values.status;
-      return matchName && matchDepartment && matchStatus;
-    });
-    setFilteredFaculty(filtered);
+    setSearchParams(values);
   };
 
   const resetSearch = () => {
     searchForm.resetFields();
-    setFilteredFaculty([...faculty]);
+    setSearchParams({});
   };
 
-  const handleSave = (values) => {
-    setLoading(true);
-    
-    // Simulate API call
-    setTimeout(() => {
+  const handleSave = async (values) => {
+    try {
+      setSubmitLoading(true);
+      
       if (editingFaculty) {
         // Update existing faculty
-        const updatedFaculty = faculty.map(f => 
-          f.id === editingFaculty.id ? { ...f, ...values } : f
-        );
-        setFaculty(updatedFaculty);
-        setFilteredFaculty(updatedFaculty);
+        await updateFaculty(editingFaculty._id, values);
         message.success('Faculty updated successfully!');
       } else {
         // Create new faculty
-        const newFaculty = {
-          id: Math.max(...faculty.map(f => f.id)) + 1,
-          ...values,
-        };
-        const updatedFaculty = [...faculty, newFaculty];
-        setFaculty(updatedFaculty);
-        setFilteredFaculty(updatedFaculty);
+        await createFaculty(values);
         message.success('Faculty added successfully!');
       }
+      
       setIsModalVisible(false);
-      setLoading(false);
       form.resetFields();
-    }, 500);
+      refetchFaculty();
+    } catch (error) {
+      const errorMsg = error.response?.data?.message || 'Operation failed';
+      message.error(errorMsg);
+    } finally {
+      setSubmitLoading(false);
+    }
   };
 
-  const handleDelete = (facultyId) => {
-    setLoading(true);
-    
-    // Simulate API call
-    setTimeout(() => {
-      const updatedFaculty = faculty.filter(f => f.id !== facultyId);
-      setFaculty(updatedFaculty);
-      setFilteredFaculty(updatedFaculty);
+  const handleDelete = async (facultyId) => {
+    try {
+      await deleteFaculty(facultyId);
       message.success('Faculty deleted successfully!');
-      setLoading(false);
-    }, 500);
+      refetchFaculty();
+    } catch (error) {
+      const errorMsg = error.response?.data?.message || 'Delete failed';
+      message.error(errorMsg);
+    }
   };
 
-  const handleStatusChange = (facultyId, newStatus) => {
-    setLoading(true);
-    
-    // Simulate API call
-    setTimeout(() => {
-      const updatedFaculty = faculty.map(f => 
-        f.id === facultyId ? { ...f, status: newStatus } : f
-      );
-      setFaculty(updatedFaculty);
-      setFilteredFaculty(updatedFaculty);
+  const handleStatusChange = async (facultyId, newStatus) => {
+    try {
+      await updateFaculty(facultyId, { status: newStatus });
       message.success(`Faculty ${newStatus === 'active' ? 'activated' : 'deactivated'} successfully!`);
-      setLoading(false);
-    }, 500);
+      refetchFaculty();
+    } catch (error) {
+      const errorMsg = error.response?.data?.message || 'Status update failed';
+      message.error(errorMsg);
+    }
+  };
+
+  const handleCreateUserAccount = (faculty) => {
+    setSelectedFaculty(faculty);
+    userForm.setFieldsValue({
+      username: faculty.employeeId,
+      email: faculty.email,
+      name: faculty.name,
+      department: faculty.department,
+      role: 'faculty'
+    });
+    setCreateAccountModalVisible(true);
+  };
+
+  const handleUserFormCancel = () => {
+    setCreateAccountModalVisible(false);
+    userForm.resetFields();
+  };
+
+  const handleUserFormSubmit = async (values) => {
+    try {
+      setUserFormLoading(true);
+      
+      // Prepare data for registration
+      const userData = {
+        username: values.username,
+        email: values.email,
+        password: values.password,
+        role: 'faculty',
+        name: selectedFaculty.name,
+        phone: selectedFaculty.phone,
+        department: selectedFaculty.department,
+        existingFacultyId: selectedFaculty._id
+      };
+      
+      // Use the API service function
+      const response = await registerFaculty(userData);
+      
+      if (response.data.success) {
+        message.success('User account created successfully!');
+        setCreateAccountModalVisible(false);
+        userForm.resetFields();
+        refetchFaculty();
+      } else {
+        message.error(response.data.message || 'Failed to create user account');
+      }
+    } catch (error) {
+      console.error('Error creating user account:', error);
+      const errorMsg = error.response?.data?.message || 'Failed to create user account. Please try again.';
+      message.error(errorMsg);
+    } finally {
+      setUserFormLoading(false);
+    }
   };
 
   const columns = [
@@ -182,11 +214,13 @@ const ManageFaculty = () => {
       title: 'Employee ID',
       dataIndex: 'employeeId',
       key: 'employeeId',
+      sorter: (a, b) => a.employeeId.localeCompare(b.employeeId),
     },
     {
       title: 'Name',
       dataIndex: 'name',
       key: 'name',
+      sorter: (a, b) => a.name.localeCompare(b.name),
       render: (text) => (
         <Space>
           <Avatar icon={<UserOutlined />} />
@@ -212,6 +246,16 @@ const ManageFaculty = () => {
       title: 'Department',
       dataIndex: 'department',
       key: 'department',
+      sorter: (a, b) => a.department.localeCompare(b.department),
+      filters: [
+        { text: 'Mathematics', value: 'Mathematics' },
+        { text: 'Physics', value: 'Physics' },
+        { text: 'Computer Science', value: 'Computer Science' },
+        { text: 'Chemistry', value: 'Chemistry' },
+        { text: 'English', value: 'English' },
+        { text: 'History', value: 'History' },
+      ],
+      onFilter: (value, record) => record.department === value,
     },
     {
       title: 'Qualification',
@@ -224,7 +268,7 @@ const ManageFaculty = () => {
       key: 'subjects',
       render: (subjects) => (
         <Space size={[0, 4]} wrap>
-          {subjects.map(subject => (
+          {subjects && subjects.map(subject => (
             <Tag color="blue" key={subject}>
               <BookOutlined /> {subject}
             </Tag>
@@ -233,12 +277,35 @@ const ManageFaculty = () => {
       ),
     },
     {
+      title: 'Account Status',
+      key: 'accountStatus',
+      render: (_, record) => (
+        record.userId ? 
+          <Tag color="green">User Account Exists</Tag> : 
+          <Button 
+            type="link" 
+            onClick={() => handleCreateUserAccount(record)}
+          >
+            Create User Account
+          </Button>
+      )
+    },
+    {
       title: 'Status',
       dataIndex: 'status',
       key: 'status',
-      render: (status) => {
+      filters: [
+        { text: 'Active', value: 'active' },
+        { text: 'Inactive', value: 'inactive' },
+      ],
+      onFilter: (value, record) => record.status === value,
+      render: (status, record) => {
         const color = status === 'active' ? 'green' : 'volcano';
-        return <Tag color={color}>{status.toUpperCase()}</Tag>;
+        return (
+          <Tag color={color}>
+            {status.toUpperCase()}
+          </Tag>
+        );
       }
     },
     {
@@ -257,7 +324,7 @@ const ManageFaculty = () => {
           <Tooltip title="Delete">
             <Popconfirm
               title="Are you sure you want to delete this faculty?"
-              onConfirm={() => handleDelete(record.id)}
+              onConfirm={() => handleDelete(record._id)}
               okText="Yes"
               cancelText="No"
             >
@@ -362,12 +429,24 @@ const ManageFaculty = () => {
       
       {/* Faculty Table */}
       <Card>
-        <Table 
-          columns={columns} 
-          dataSource={filteredFaculty} 
-          rowKey="id"
-          loading={loading}
-        />
+        <DataLoader
+          loading={fetchLoading}
+          error={fetchError}
+          data={faculty}
+          emptyMessage="No faculty members found"
+        >
+          <Table 
+            columns={columns} 
+            dataSource={faculty} 
+            rowKey="_id"
+            pagination={{
+              defaultPageSize: 10,
+              showSizeChanger: true,
+              pageSizeOptions: ['10', '20', '50'],
+              showTotal: (total, range) => `${range[0]}-${range[1]} of ${total} items`
+            }}
+          />
+        </DataLoader>
       </Card>
 
       {/* Add/Edit Faculty Modal */}
@@ -382,13 +461,19 @@ const ManageFaculty = () => {
           form={form}
           layout="vertical"
           onFinish={handleSave}
+          validateMessages={{
+            required: '${label} is required!',
+            types: {
+              email: '${label} is not a valid email!'
+            }
+          }}
         >
           <Row gutter={16}>
             <Col span={12}>
               <Form.Item
                 name="employeeId"
                 label="Employee ID"
-                rules={[{ required: true, message: 'Please enter employee ID' }]}
+                rules={[{ required: true }]}
               >
                 <Input placeholder="Enter employee ID" />
               </Form.Item>
@@ -397,7 +482,7 @@ const ManageFaculty = () => {
               <Form.Item
                 name="name"
                 label="Full Name"
-                rules={[{ required: true, message: 'Please enter full name' }]}
+                rules={[{ required: true }]}
               >
                 <Input placeholder="Enter full name" />
               </Form.Item>
@@ -410,8 +495,8 @@ const ManageFaculty = () => {
                 name="email"
                 label="Email"
                 rules={[
-                  { required: true, message: 'Please enter email' },
-                  { type: 'email', message: 'Please enter a valid email' }
+                  { required: true },
+                  { type: 'email' }
                 ]}
               >
                 <Input placeholder="Enter email" />
@@ -421,7 +506,7 @@ const ManageFaculty = () => {
               <Form.Item
                 name="phone"
                 label="Phone Number"
-                rules={[{ required: true, message: 'Please enter phone number' }]}
+                rules={[{ required: true }]}
               >
                 <Input placeholder="Enter phone number" />
               </Form.Item>
@@ -433,7 +518,7 @@ const ManageFaculty = () => {
               <Form.Item
                 name="department"
                 label="Department"
-                rules={[{ required: true, message: 'Please select department' }]}
+                rules={[{ required: true }]}
               >
                 <Select placeholder="Select department">
                   {departments.map(dept => (
@@ -446,7 +531,7 @@ const ManageFaculty = () => {
               <Form.Item
                 name="qualification"
                 label="Qualification"
-                rules={[{ required: true, message: 'Please select qualification' }]}
+                rules={[{ required: true }]}
               >
                 <Select placeholder="Select qualification">
                   {qualifications.map(qual => (
@@ -462,7 +547,7 @@ const ManageFaculty = () => {
               <Form.Item
                 name="joiningDate"
                 label="Joining Date"
-                rules={[{ required: true, message: 'Please enter joining date' }]}
+                rules={[{ required: true }]}
               >
                 <Input placeholder="YYYY-MM-DD" />
               </Form.Item>
@@ -471,7 +556,7 @@ const ManageFaculty = () => {
               <Form.Item
                 name="status"
                 label="Status"
-                rules={[{ required: true, message: 'Please select status' }]}
+                rules={[{ required: true }]}
                 initialValue="active"
               >
                 <Select placeholder="Select status">
@@ -503,8 +588,88 @@ const ManageFaculty = () => {
           <Form.Item style={{ marginBottom: 0, textAlign: 'right' }}>
             <Space>
               <Button onClick={handleCancel}>Cancel</Button>
-              <Button type="primary" htmlType="submit" loading={loading}>
+              <Button 
+                type="primary" 
+                htmlType="submit" 
+                loading={submitLoading}
+              >
                 {editingFaculty ? 'Update' : 'Create'}
+              </Button>
+            </Space>
+          </Form.Item>
+        </Form>
+      </Modal>
+
+      {/* User Account Creation Modal */}
+      <Modal
+        title="Create User Account"
+        open={createAccountModalVisible}
+        onCancel={handleUserFormCancel}
+        footer={null}
+      >
+        <Form
+          form={userForm}
+          layout="vertical"
+          onFinish={handleUserFormSubmit}
+        >
+          <Form.Item
+            name="username"
+            label="Username"
+            rules={[{ required: true, message: 'Please enter a username' }]}
+          >
+            <Input disabled />
+          </Form.Item>
+          
+          <Form.Item
+            name="email"
+            label="Email"
+            rules={[
+              { required: true, message: 'Please enter an email' },
+              { type: 'email', message: 'Please enter a valid email' }
+            ]}
+          >
+            <Input disabled />
+          </Form.Item>
+          
+          <Form.Item
+            name="password"
+            label="Password"
+            rules={[
+              { required: true, message: 'Please enter a password' },
+              { min: 6, message: 'Password must be at least 6 characters' }
+            ]}
+          >
+            <Input.Password />
+          </Form.Item>
+          
+          <Form.Item
+            name="confirmPassword"
+            label="Confirm Password"
+            dependencies={['password']}
+            rules={[
+              { required: true, message: 'Please confirm the password' },
+              ({ getFieldValue }) => ({
+                validator(_, value) {
+                  if (!value || getFieldValue('password') === value) {
+                    return Promise.resolve();
+                  }
+                  return Promise.reject(new Error('The two passwords do not match'));
+                },
+              }),
+            ]}
+          >
+            <Input.Password />
+          </Form.Item>
+          
+          <Form.Item style={{ marginBottom: 0, textAlign: 'right' }}>
+            <Space>
+              <Button onClick={handleUserFormCancel}>Cancel</Button>
+              <Button 
+                type="primary" 
+                htmlType="submit" 
+                loading={userFormLoading}
+              >
+                Create Account
               </Button>
             </Space>
           </Form.Item>
