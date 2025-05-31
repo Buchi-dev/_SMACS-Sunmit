@@ -75,7 +75,6 @@ const App = () => {
         >
           <Route index element={<Dashboard />} />
           <Route path="dashboard" element={<Dashboard />} />
-          <Route path="manage-students" element={<ManageStudents />} />
           <Route path="manage-subjects" element={<ManageSubjects />} />
           <Route path="manage-attendance" element={<ManageAttendance />} />
           <Route path="attendance-panel" element={<AttendancePanel />} />

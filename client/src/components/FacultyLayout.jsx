@@ -27,11 +27,7 @@ const FacultyLayout = ({ onLogout }) => {
       icon: <DashboardOutlined />,
       label: <Link to="/faculty/dashboard">Dashboard</Link>,
     },
-    {
-      key: '/faculty/manage-students',
-      icon: <TeamOutlined />,
-      label: <Link to="/faculty/manage-students">Manage Students</Link>,
-    },
+
     {
       key: '/faculty/manage-subjects',
       icon: <BookOutlined />,

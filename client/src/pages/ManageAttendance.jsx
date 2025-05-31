@@ -56,6 +56,8 @@ const ManageAttendance = () => {
     { id: 1, name: 'Class A' },
     { id: 2, name: 'Class B' },
     { id: 3, name: 'Class C' },
+    { id: 4, name: 'Class D' },
+    { id: 5, name: 'Class E' },
   ];
 
   const subjects = [
